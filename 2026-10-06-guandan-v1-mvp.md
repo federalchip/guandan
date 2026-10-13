@@ -165,7 +165,7 @@ v1 用 HTTP 请求足够。规则和服务不依赖 HTTP；v2 如加入 WebSocke
 | `Action` | `kind: PLAY/PASS, cardIds: List<Integer>, interpretationKey: String`；PASS 不带牌和声明，Java 可用分离的不可变子类型 |
 | `Trick` | `ownerId, move, pendingResponders: Set<Integer>` |
 | `GameResult` | `winnerTeam: int, placementGroups: List<List<Integer>>, outcome: DOUBLE_UP/TEAMMATE_THIRD/TEAMMATE_LAST` |
-| `GameState` | `profile, hands: List<List<Integer>>, discarded: List<Integer>, currentPlayer: Integer, trick: Trick, finishOrder, phase: PLAYING/FINISHED, result, version`；结束时 currentPlayer=null |
+| `GameState` | `profile, hands: List<List<Integer>>, discarded: List<Integer>, currentPlayer: Integer, trick: Trick, finishOrder, phase: PLAYING/FINISHED, result, version`；`discarded` 含当前 `trick` 的实体牌，`trick` 不另计数；结束时 currentPlayer=null |
 | `PublicTrick` | `ownerId, move, cards: List<Card>`；只有已公开打出的实体牌 |
 | `PlayerView` | `ownHand: List<Card>, remainingCounts: List<Integer>, trick: PublicTrick, finishOrder, currentPlayer: Integer, isLead: boolean, canPass: boolean, profileId: String, levelRank: int, phase, result: GameResult, version: long`；不含其他人的手牌和服务端种子 |
 | `DomainEvent` | `event_type, actor_id, payload`；包括 PLAYED、PASSED、TRICK_CLOSED、PLAYER_FINISHED、GAME_FINISHED；payload 只含公开信息 |
@@ -308,7 +308,7 @@ PLAY action：`{kind:"PLAY", card_ids:[...], interpretation_key:"..."}`。PASS a
 
 - [ ] 把本文规则与明确简化复制到 rules-v1.md，不增加升级和贡还功能。
 - [ ] 用下方测试矩阵建立人工 expected 数据，覆盖每种牌型、百搭、比较与接风；牌张使用 `S3@0` 等符号，@0/@1 区分两副。P01–P07 必须按人工列出的**完整语义声明集合**录入，不能用判定器的输出反填；每个声明同时记录牌型、长度、主比较点数和规范化展示绑定。
-- [ ] 检查每个样例没有超过两张同花同点实体牌、没有重复 CardId；短手牌场景中未参与的牌放到 discarded，保证 108 张守恒。
+- [ ] 检查每个样例没有超过两张同花同点实体牌、没有重复 CardId；短手牌场景中未参与的牌放到 discarded。按“四家手牌 + discarded = 108 个不同 ID”检查守恒，当前 trick 牌是 discarded 的子集。
 - [ ] 人工核对低 A、级牌自然顺序、炸弹等级、双下结算四组预期，记录采用的明确约定。
 - [ ] 提交规则与 fixture，提交信息 `docs: define guandan v1 rule contract`。
 
@@ -401,7 +401,7 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 
 - [ ] 写 `test_lead_cannot_pass`、`test_invalid_action_does_not_mutate_input`、`test_turn_skips_finished_player`、`test_passed_player_can_respond_to_new_play`。
 - [ ] 用短手牌 fixture 写 `test_last_play_unbeaten_gives_partner_lead`、`test_last_play_beaten_does_not_give_partner_lead`、`test_responder_set_uses_active_players`。
-- [ ] 写 `test_double_up_has_shared_last_group`、`test_third_finish_assigns_remaining_last`、`test_terminal_remaining_cards_still_conserved`、`test_view_hides_opponent_cards_and_seed`。
+- [ ] 写 `test_double_up_has_shared_last_group`、`test_third_finish_assigns_remaining_last`、`test_terminal_remaining_cards_still_conserved`、`test_view_hides_opponent_cards_and_seed`；守恒断言只合计四家手牌与 discarded，并验证当前 trick 牌均在 discarded 中。
 - [ ] 运行 `.\mvnw.cmd -q -Dtest=GameEngineTest,PlayerViewFactoryTest test`，确认红灯。
 - [ ] 实现单动作纯转移；先验证 ID、归属、回合和声明，再扣牌；用待响应集合处理一轮；结束时保留未出的牌。
 - [ ] 同一命令要求 PASS；有效动作 version+1；无效动作 version、hands、discarded、trick 都保持不变。
@@ -417,7 +417,7 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 - [ ] 运行 `.\mvnw.cmd -q -Dtest=RandomLegalPolicyTest test`，确认红灯。
 - [ ] 均匀选择合法动作；policy 不导入 service/store/engine，也不接收其他人的手牌；没有 LLM 或网络依赖。
 - [ ] 同一命令要求 PASS；通过函数参数与依赖检查确认其可见信息边界。
-- [ ] 在 `M2SmokeTest` 写 `seededGamesAndTimings`：四个合法随机机器人以 seed=10000 预热一局，再完整运行 seed=0–19 的 20 局；沿用服务合同的稳定策略种子派生方式，每步检查牌数守恒、回合和动作合法性，每局最多 512 个动作。
+- [ ] 在 `M2SmokeTest` 写 `seededGamesAndTimings`：四个合法随机机器人以 seed=10000 预热一局，再完整运行 seed=0–19 的 20 局；沿用服务合同的稳定策略种子派生方式，每步按“四家手牌 + discarded = 108、trick ⊆ discarded”检查守恒，并检查回合和动作合法性；每局最多 512 个动作。
 - [ ] 运行 `.\mvnw.cmd -q -Pslow -Dtest=M2SmokeTest test`，输出 `artifacts/m2-smoke.json`：逐局 seed、结果、动作数、候选生成累计耗时、纯引擎加策略的整局计算耗时，以及样本 p50/p95/max；另列含不变量检查和日志的总壁钟时间。该初测不包含 HTTP/动画，不当作 T10 的 HTTP 批次验收；用实际均值估算 10,000 局计算时间，并标注仅为小样本推算。
 - [ ] 提交 `feat: add random legal bot policy`。
 

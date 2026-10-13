@@ -7,7 +7,8 @@
 - `backend/pom.xml`：Spring MVC、Validation、JUnit/MockMvc、QuickTheories；Maven Wrapper 3.3.4/Maven 3.9.11；`slow`/`performance` 标签配置；JDK 17 编译目标。
 - `GuandanApplication`：Spring Boot 启动入口；`application.yml`：端口 8000。
 - `HealthController` 和 `HealthControllerTest`：无会话的 `/api/v1/health`，已用真实 JAR 启动核对。
-- 还没有牌目录、规则引擎、牌局、机器人、游戏 API、前端或 CLI。不要因为 `mvnw.cmd test` 通过就标记 T1/T2 或 MVP 完成。
+- A–C 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator` 及对应测试。尚无合法动作生成器、牌局状态机、机器人、游戏 API、前端或 CLI；现有测试通过不代表 MVP 已完成。
+- 回合 fixture 的守恒口径为“四家手牌 + `discarded` = 108 个不同 CardId”；当前 `trick` 牌属于 `discarded`，不额外计数。短手牌场景由测试按四家手牌在整副牌中的补集构造 `discarded`。
 
 ## 交付顺序和可分配任务
 
@@ -18,10 +19,10 @@
 | C：T3 选牌解析与比较 | Qoder 在 B 之后承担 | `rules/MoveClassifier.java`、`MoveComparator.java` 和对应测试；消费 A 的人工 fixture | `./mvnw.cmd -Dtest=MoveClassifierTest,MoveComparatorTest test`；P01–P07 必须**集合相等**，不能只查包含某一声明；非法实体和重复 ID 有确定错误 |
 | D：T4a 独立参照 | 可交 Qoder，但须与 C 的实现者隔离审查 | 测试专用 `SmallHandOracle.java`，n≤10 穷举；不调用生产判定/比较/生成器 | `./mvnw.cmd -Dtest=SmallHandOracleTest test`；独立通过人工完整预期 |
 | E：T4b–T4c 生成器与基准 | 在 C、D 之后交付 | `LegalMoveGenerator.java`，小手牌双向语义集合对照；B01–B04 固定 27 张手牌基准 | `./mvnw.cmd -Dtest=LegalMoveGeneratorTest,GeneratorOracleTest test`；`./mvnw.cmd -Pperformance -Dtest=GenerationBenchmarkTest test` 输出真实基线。T4b 正确性与 T4c 性能分别验收 |
-| F：T5–T7 牌局、机器人、API | 在 E 后分阶段交付 | 状态机/接风/结算→合法随机机器人及 M2 20 局耗时→内存服务、DTO、幂等和 HTTP；每阶段依主计划单独验收 | 每个动作保持 108 张守恒；M2 输出整局耗时；服务端同 request_id 不重复扣牌、批次失败回滚、对手手牌不可见 |
+| F：T5–T7 牌局、机器人、API | 在 E 后分阶段交付 | 状态机/接风/结算→合法随机机器人及 M2 20 局耗时→内存服务、DTO、幂等和 HTTP；每阶段依主计划单独验收 | 每个动作检查四家手牌与 `discarded` 合计 108 个不同 ID，且 `trick` 牌属于 `discarded`；M2 输出整局耗时；服务端同 request_id 不重复扣牌、批次失败回滚、对手手牌不可见 |
 | G：T8–T11 页面与完整验收 | API 合同稳定后交付 | Vue 牌桌、声明选择、按 `{game_id, command}` 恢复、浏览器 E2E、T10 模拟与性能 | 页面“开始一局”“再来一局”；T10 做完整性能验收，T11 做浏览器与交付验收 |
 
-推荐先将 A–C 作为第一批 Qoder 任务，D/E 在 C 的接口稳定后领取。F/G 不宜与 C/E 同时改规则合同或共享类；若多人并行，只并行各自拥有的文件，接口变更先写入主计划和 fixture。当前目录不是 Git 仓库，提交记录要由项目仓库建立后再执行；不要把“提交成功”当作本地验收的前提。
+A–C 已交付；下一批从 D（T4a 独立参照）开始，E（T4b–T4c 生成器与基准）在独立参照通过后验收。F/G 不宜与 D/E 同时改规则合同或共享类；若多人并行，只并行各自拥有的文件，接口变更先写入主计划和 fixture。项目已建立本地 Git 仓库；提交与推送分别记录，不能用提交成功代替测试验收。
 
 ## 每包统一实践
 
@@ -38,6 +39,6 @@
 - HTTP 统一 `/api/v1`，创建局与健康检查之外使用会话令牌；只返回白名单公开 DTO。浏览器保存 `{game_id, command}`，网络结果不明时原样重试。
 - 不新增升级、贡还、跨局状态、数据库、多人联机或 Python 后端。性能基准 T4 先建立，M2 测整局耗时，T10 才做完整验收。
 
-## 可直接交给 Qoder 的第一批指令
+## 可直接交给 Qoder 的下一批指令
 
-> 请在 `E:\professional_class\guandan` 中只完成本交接文档的 A（T1 人工规则基线）和 B（T2 牌与领域模型），不要开始 T3 或修改前端。先通读 `2026-10-06-guandan-v1-mvp.md` 的规则合同、架构合同、P01–P07/R01–R24 预期，以及 `backend/README.md`。A 的人工 expected 由规则合同逐项推导，不能运行判定器后反填；B 先写 `DeckTest` 并看到预期红灯，再实现纯 Java 模型和发牌，最后运行 `./mvnw.cmd -Dtest=DeckTest test` 与 `./mvnw.cmd test`。交付 `docs/rules-v1.md`、两个 JSON fixture、`domain/model`、`Deck`、`RuleProfile`、`CardIds` 和测试；附实际测试命令、通过数量、尚未解决的问题。现有 Spring Boot、Maven 版本与健康接口保留，若必须改动配置，先说明原因。当前目录不是 Git 仓库，不要声称已经提交代码。
+> 请在 `E:\professional_class\guandan` 中从 D（T4a 独立参照）开始，按主计划分别验收 D 与 E（T4b–T4c 生成器与固定复杂手牌基准），暂不开始 T5 或前端。先通读 `2026-10-06-guandan-v1-mvp.md` 的 T4 合同、`docs/rules-v1.md` 和两份人工 fixture；独立参照不能调用生产判定、比较或生成器，也不能用生产输出反填人工预期。完成 D 后再实现 E，并按任务单运行指定的正确性测试与性能基准。交付时列出变更文件、实际命令与结果、基准数据及未解决问题；回合 fixture 的牌数守恒按“四家手牌 + discarded = 108、trick ⊆ discarded”执行。

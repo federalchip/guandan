@@ -1,6 +1,6 @@
 # 掼蛋 v1 后端工程
 
-此目录是 JDK 17、Spring Boot 3.5.16、Maven 3.9.11 的工程骨架。当前仅提供应用启动和 `GET /api/v1/health`；牌、规则、牌局、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
+此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–C：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较；另有应用启动和 `GET /api/v1/health`。合法动作生成器、牌局状态机、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
 
 ## 环境
 
@@ -18,6 +18,8 @@ java -jar target/guandan-v1.jar
 ```
 
 服务默认监听 8000 端口。另开终端访问 `http://127.0.0.1:8000/api/v1/health`，应收到 `{"status":"UP"}`。`/api/v1/games` 尚不存在，不能用健康检查代替游戏功能验收。
+
+回合 fixture 的 108 张守恒口径：四家手牌与 `discarded` 互不重叠且合计 108 个不同 CardId；当前 `trick` 的牌已在 `discarded` 中，不再另加一次。短手牌 fixture 中未参与的牌也放入 `discarded`。
 
 JUnit Jupiter 测试默认排除 `@Tag("slow")` 和 `@Tag("performance")`；`-Pslow` 运行普通及 slow 测试，`-Pperformance` 运行普通及 performance 测试。可用 `-Dtest=ClassName` 单独选类。测试报告位于 `target/surefire-reports/`，T4/T10 的性能与模拟报告按主计划写入 `artifacts/`。新的性能测试必须打 `performance` 标签，批量模拟测试必须打 `slow` 标签。
 
