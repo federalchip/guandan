@@ -1,0 +1,26 @@
+# 掼蛋 v1 后端工程
+
+此目录是 JDK 17、Spring Boot 3.5.16、Maven 3.9.11 的工程骨架。当前仅提供应用启动和 `GET /api/v1/health`；牌、规则、牌局、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
+
+## 环境
+
+- JDK 17（`java -version` 应显示 17）；Maven 使用仓库中的 Wrapper，无需全局安装。
+- Windows PowerShell 从 `backend/` 运行 `./mvnw.cmd`；macOS/Linux 运行 `sh ./mvnw`。
+- Wrapper 锁定 Maven 3.9.11、Wrapper 3.3.4；首次运行会下载 Maven 和依赖。
+- Spring Boot 的依赖及 Maven 插件版本由 `spring-boot-starter-parent:3.5.16` 管理；QuickTheories 固定为 0.26。
+
+## 运行与检查
+
+```powershell
+./mvnw.cmd test
+./mvnw.cmd package
+java -jar target/guandan-v1.jar
+```
+
+服务默认监听 8000 端口。另开终端访问 `http://127.0.0.1:8000/api/v1/health`，应收到 `{"status":"UP"}`。`/api/v1/games` 尚不存在，不能用健康检查代替游戏功能验收。
+
+JUnit Jupiter 测试默认排除 `@Tag("slow")` 和 `@Tag("performance")`；`-Pslow` 运行普通及 slow 测试，`-Pperformance` 运行普通及 performance 测试。可用 `-Dtest=ClassName` 单独选类。测试报告位于 `target/surefire-reports/`，T4/T10 的性能与模拟报告按主计划写入 `artifacts/`。新的性能测试必须打 `performance` 标签，批量模拟测试必须打 `slow` 标签。
+
+## 边界
+
+`com.guandan.domain`、`rules`、`engine`、`bots` 保持纯 Java，不导入 Spring、Jackson 或 HTTP DTO。`api` 只负责请求/响应与校验，`service` 负责会话、幂等、每局锁和命令批次。领域实体用 JDK 17 record/enum；嵌套集合仍需防御性复制。所有用户动作最终由后端裁决。

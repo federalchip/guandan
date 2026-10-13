@@ -1,0 +1,624 @@
+{
+  "profile_id": "gd-v1-level2",
+  "level_rank": 2,
+  "description": "掼蛋 v1 人工规则预期用例。expected 全部由 docs/rules-v1.md 规则合同人工推导，不得由判定器/生成器输出反填。牌张符号 S/H/D/C=黑桃/红桃/方块/梅花，@0/@1 区分两副；JOKER_SMALL/JOKER_BIG=小王/大王。main_rank 存自然点数（级牌2记为2，A=14，小王=15，大王=16），比较时级牌提升由 MoveComparator 负责；序列牌型 main_rank 为规范化高端点（A2345 高端点=5）。wild_bindings 按 card_id 升序排列，仅同花顺 suit 为所声明花色，其余 suit=null。",
+  "conventions": {
+    "declaration_set_key": "(move_kind, length, main_rank)",
+    "wild_binding_display": "三带对带牌点数取最小有效自然点数；同一语义只保留按 card_id 与自然点数排序的规范代表",
+    "empty_set_meaning": "expected_declarations 为空表示该精确选牌不构成任何合法牌型（若出牌则 INVALID_MOVE），区别于 type=error 的输入错误",
+    "level_rank_in_sequences": "顺子/三连对/钢板/同花顺中级牌2按自然点数参与，不提升"
+  },
+  "cases": [
+    {
+      "case_id": "P01",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "S4@0", "H2@0", "H2@1"],
+      "expected_declarations": [
+        {
+          "move_kind": "FULL_HOUSE",
+          "length": 5,
+          "main_rank": 3,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 3, "suit": null},
+            {"card_symbol": "H2@1", "rank": 4, "suit": null}
+          ]
+        },
+        {
+          "move_kind": "FULL_HOUSE",
+          "length": 5,
+          "main_rank": 4,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 4, "suit": null},
+            {"card_symbol": "H2@1", "rank": 4, "suit": null}
+          ]
+        }
+      ],
+      "note": "3,3,4,百搭,百搭：首项三张3带对子4，次项三张4带对子3；两个声明 main_rank 不同故均保留"
+    },
+    {
+      "case_id": "P02",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "H2@0", "H2@1"],
+      "expected_declarations": [
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 5,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 2, "suit": null},
+            {"card_symbol": "H2@1", "rank": 14, "suit": null}
+          ]
+        },
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 2, "suit": null},
+            {"card_symbol": "H2@1", "rank": 6, "suit": null}
+          ]
+        },
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 6, "suit": null},
+            {"card_symbol": "H2@1", "rank": 7, "suit": null}
+          ]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 5,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 2, "suit": "S"},
+            {"card_symbol": "H2@1", "rank": 14, "suit": "S"}
+          ]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 2, "suit": "S"},
+            {"card_symbol": "H2@1", "rank": 6, "suit": "S"}
+          ]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 6, "suit": "S"},
+            {"card_symbol": "H2@1", "rank": 7, "suit": "S"}
+          ]
+        }
+      ],
+      "note": "3,4,5,百搭,百搭：端点5(A2345)绑定2,A；端点6(23456)绑定2,6；端点7(34567)绑定6,7；同花顺 suit=S，普通顺子 suit=null"
+    },
+    {
+      "case_id": "P03",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "H2@0", "H2@1"],
+      "expected_declarations": [
+        {
+          "move_kind": "FULL_HOUSE",
+          "length": 5,
+          "main_rank": 3,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 2, "suit": null},
+            {"card_symbol": "H2@1", "rank": 2, "suit": null}
+          ]
+        },
+        {
+          "move_kind": "BOMB",
+          "length": 5,
+          "main_rank": 3,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 3, "suit": null},
+            {"card_symbol": "H2@1", "rank": 3, "suit": null}
+          ]
+        }
+      ],
+      "note": "3,3,3,百搭,百搭：三带对带牌点数只留最小有效自然点数2作展示绑定；同时支持五张3炸弹"
+    },
+    {
+      "case_id": "P04",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "S4@0", "H2@0", "H2@1"],
+      "expected_declarations": [
+        {
+          "move_kind": "TRIPLE_RUN",
+          "length": 6,
+          "main_rank": 4,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 4, "suit": null},
+            {"card_symbol": "H2@1", "rank": 4, "suit": null}
+          ]
+        }
+      ],
+      "note": "3,3,3,4,百搭,百搭：钢板 333+444，高端点4"
+    },
+    {
+      "case_id": "P05",
+      "type": "declaration",
+      "selected": ["H2@0", "H2@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 2, "wild_bindings": []}
+      ],
+      "note": "两张红桃2单独成对=级牌对子，不能声明为其他点数的对子"
+    },
+    {
+      "case_id": "P06",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0", "H2@0"],
+      "expected_declarations": [
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 2, "suit": null}]
+        },
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 7, "suit": null}]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 2, "suit": "S"}]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 7, "suit": "S"}]
+        }
+      ],
+      "note": "=R15；3,4,5,6,百搭：两个顺子(端点6/7)及两个同花顺声明"
+    },
+    {
+      "case_id": "P07",
+      "type": "declaration",
+      "selected": ["H2@0", "H2@1", "JOKER_SMALL@0"],
+      "expected_declarations": [],
+      "note": "百搭不能补成三张王，也不能与小王形成普通三同张；空集"
+    },
+    {
+      "case_id": "R01",
+      "type": "declaration",
+      "selected": ["S3@0", "S3@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "两个不同实体的同花同点牌可形成对子，分别选牌/扣牌"
+    },
+    {
+      "case_id": "R03",
+      "type": "declaration",
+      "selected": ["H2@0"],
+      "expected_declarations": [
+        {"move_kind": "SINGLE", "length": 1, "main_rank": 2, "wild_bindings": []}
+      ],
+      "note": "红桃2单出仅是级牌单张，不可声明为王或其他单张"
+    },
+    {
+      "case_id": "R04",
+      "type": "declaration",
+      "selected": ["H2@0", "H2@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 2, "wild_bindings": []}
+      ],
+      "note": "=P05；两张红桃2单独出=级牌对子"
+    },
+    {
+      "case_id": "R05a",
+      "type": "declaration",
+      "selected": ["JOKER_SMALL@0", "JOKER_SMALL@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 15, "wild_bindings": []}
+      ],
+      "note": "两小王成对"
+    },
+    {
+      "case_id": "R05b",
+      "type": "declaration",
+      "selected": ["JOKER_BIG@0", "JOKER_BIG@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 16, "wild_bindings": []}
+      ],
+      "note": "两大王成对"
+    },
+    {
+      "case_id": "R05c",
+      "type": "declaration",
+      "selected": ["JOKER_SMALL@0", "JOKER_BIG@0"],
+      "expected_declarations": [],
+      "note": "大小王混合不能成对；空集"
+    },
+    {
+      "case_id": "R06",
+      "type": "declaration",
+      "selected": ["S3@0", "H5@0", "D8@0", "C10@0"],
+      "expected_declarations": [],
+      "note": "四种不同花色/点数不连的普通牌，不会被误识别为炸弹或其他牌型；空集"
+    },
+    {
+      "case_id": "R07a",
+      "type": "declaration",
+      "selected": ["SA@0", "S2@0", "D3@0", "C4@0", "H5@0"],
+      "expected_declarations": [
+        {"move_kind": "STRAIGHT", "length": 5, "main_rank": 5, "wild_bindings": []}
+      ],
+      "note": "A2345 合法五张顺子，高端点5（A作低点）；混合花色故非同花顺"
+    },
+    {
+      "case_id": "R07b",
+      "type": "declaration",
+      "selected": ["S10@0", "HJ@0", "DQ@0", "CK@0", "SA@1"],
+      "expected_declarations": [
+        {"move_kind": "STRAIGHT", "length": 5, "main_rank": 14, "wild_bindings": []}
+      ],
+      "note": "10JQKA 合法五张顺子，高端点A(14)"
+    },
+    {
+      "case_id": "R08a",
+      "type": "declaration",
+      "selected": ["SK@0", "SA@0", "S2@0", "D3@0", "C4@0"],
+      "expected_declarations": [],
+      "note": "KA234 绕接，不是五张顺子；空集"
+    },
+    {
+      "case_id": "R08b",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0"],
+      "expected_declarations": [],
+      "note": "四张连续单牌不是五张顺子；空集"
+    },
+    {
+      "case_id": "R08c",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0", "S7@0", "S8@0"],
+      "expected_declarations": [],
+      "note": "六张连续单牌不是五张顺子（无六张单序列牌型）；空集"
+    },
+    {
+      "case_id": "R09a",
+      "type": "declaration",
+      "selected": ["SA@0", "HA@0", "S2@0", "D2@0", "S3@0", "H3@0"],
+      "expected_declarations": [
+        {"move_kind": "PAIR_RUN", "length": 6, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "AA2233 合法三连对（A作低点），高端点3"
+    },
+    {
+      "case_id": "R09b",
+      "type": "declaration",
+      "selected": ["SQ@0", "HQ@0", "SK@0", "HK@0", "SA@0", "HA@0"],
+      "expected_declarations": [
+        {"move_kind": "PAIR_RUN", "length": 6, "main_rank": 14, "wild_bindings": []}
+      ],
+      "note": "QQKKAA 合法三连对，高端点A(14)"
+    },
+    {
+      "case_id": "R09c",
+      "type": "declaration",
+      "selected": ["SK@0", "HK@0", "SA@1", "HA@1", "S2@0", "D2@0"],
+      "expected_declarations": [],
+      "note": "KKAA22 绕接，非法三连对；空集"
+    },
+    {
+      "case_id": "R10a",
+      "type": "declaration",
+      "selected": ["SA@0", "HA@0", "DA@0", "S2@0", "D2@0", "C2@0"],
+      "expected_declarations": [
+        {"move_kind": "TRIPLE_RUN", "length": 6, "main_rank": 2, "wild_bindings": []}
+      ],
+      "note": "AAA222 合法钢板（低A端点），高端点2"
+    },
+    {
+      "case_id": "R10b",
+      "type": "declaration",
+      "selected": ["SK@0", "HK@0", "DK@0", "SA@0", "HA@0", "DA@0"],
+      "expected_declarations": [
+        {"move_kind": "TRIPLE_RUN", "length": 6, "main_rank": 14, "wild_bindings": []}
+      ],
+      "note": "KKKAAA 合法钢板，高端点A(14)"
+    },
+    {
+      "case_id": "R11a",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0", "JOKER_SMALL@0"],
+      "expected_declarations": [],
+      "note": "王混入顺子非法，百搭不能掩盖真实王；空集"
+    },
+    {
+      "case_id": "R11b",
+      "type": "declaration",
+      "selected": ["SA@0", "HA@0", "S2@0", "D2@0", "S3@0", "JOKER_SMALL@0"],
+      "expected_declarations": [],
+      "note": "王混入三连对非法；空集"
+    },
+    {
+      "case_id": "R11c",
+      "type": "declaration",
+      "selected": ["SA@0", "HA@0", "DA@0", "S2@0", "D2@0", "JOKER_BIG@0"],
+      "expected_declarations": [],
+      "note": "王混入钢板非法；空集"
+    },
+    {
+      "case_id": "R12a",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "S4@0", "H4@0"],
+      "expected_declarations": [
+        {"move_kind": "FULL_HOUSE", "length": 5, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "33344 是三带对，比较三张的3"
+    },
+    {
+      "case_id": "R12b",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "C3@0", "S3@1"],
+      "expected_declarations": [
+        {"move_kind": "BOMB", "length": 5, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "33333 是五张炸弹，不是三带对（带牌点数须不同于三张主牌）"
+    },
+    {
+      "case_id": "R13",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "JOKER_SMALL@0", "JOKER_SMALL@1"],
+      "expected_declarations": [
+        {"move_kind": "FULL_HOUSE", "length": 5, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "333+两小王=合法三带对（王对子可作带牌），比较三张的3"
+    },
+    {
+      "case_id": "R14",
+      "type": "declaration",
+      "selected": ["S3@0", "H3@0", "D3@0", "JOKER_SMALL@0", "H2@0"],
+      "expected_declarations": [],
+      "note": "333+小王+H2：百搭不能补小王对子，因此不是三带对；空集"
+    },
+    {
+      "case_id": "R15",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0", "H2@0"],
+      "expected_declarations": [
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 2, "suit": null}]
+        },
+        {
+          "move_kind": "STRAIGHT",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 7, "suit": null}]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 6,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 2, "suit": "S"}]
+        },
+        {
+          "move_kind": "STRAIGHT_FLUSH",
+          "length": 5,
+          "main_rank": 7,
+          "wild_bindings": [{"card_symbol": "H2@0", "rank": 7, "suit": "S"}]
+        }
+      ],
+      "note": "同 P06；两个顺子及两个同花顺声明"
+    },
+    {
+      "case_id": "R16",
+      "type": "declaration",
+      "selected": ["S7@0", "H7@0", "D7@0", "C7@0", "S7@1", "H7@1", "D7@1", "C7@1", "H2@0", "H2@1"],
+      "expected_declarations": [
+        {
+          "move_kind": "BOMB",
+          "length": 10,
+          "main_rank": 7,
+          "wild_bindings": [
+            {"card_symbol": "H2@0", "rank": 7, "suit": null},
+            {"card_symbol": "H2@1", "rank": 7, "suit": null}
+          ]
+        }
+      ],
+      "note": "8张真实7加两张H2=十张7炸弹，10个卡牌ID都不同"
+    },
+    {
+      "case_id": "R17",
+      "type": "declaration",
+      "selected": ["JOKER_SMALL@0", "JOKER_SMALL@1", "JOKER_BIG@0", "H2@0"],
+      "expected_declarations": [],
+      "note": "天王炸弹缺一张用H2补，不能形成天王炸弹（百搭不能替代王）；空集"
+    },
+    {
+      "case_id": "R24",
+      "type": "declaration",
+      "selected": ["S3@1", "H3@1"],
+      "expected_declarations": [
+        {"move_kind": "PAIR", "length": 2, "main_rank": 3, "wild_bindings": []}
+      ],
+      "note": "生成器选副本A(S3@0 H3@0)，真人选副本B(S3@1 H3@1)仍可独立解析；提交只扣实际选择的B（扣牌在T7验证）"
+    },
+    {
+      "case_id": "X01",
+      "type": "declaration",
+      "selected": ["S5@0", "H5@0", "D5@0"],
+      "expected_declarations": [
+        {"move_kind": "TRIPLE", "length": 3, "main_rank": 5, "wild_bindings": []}
+      ],
+      "note": "普通三同张正例"
+    },
+    {
+      "case_id": "X02",
+      "type": "declaration",
+      "selected": ["S3@0", "S4@0", "S5@0", "S6@0", "S7@0"],
+      "expected_declarations": [
+        {"move_kind": "STRAIGHT", "length": 5, "main_rank": 7, "wild_bindings": []},
+        {"move_kind": "STRAIGHT_FLUSH", "length": 5, "main_rank": 7, "wild_bindings": []}
+      ],
+      "note": "自然同花顺同时支持普通顺子与同花顺两个声明，可选择，不强制最大牌型"
+    },
+    {
+      "case_id": "X03",
+      "type": "declaration",
+      "selected": ["S9@0", "H9@0", "D9@0", "C9@0"],
+      "expected_declarations": [
+        {"move_kind": "BOMB", "length": 4, "main_rank": 9, "wild_bindings": []}
+      ],
+      "note": "四张普通炸弹正例"
+    },
+    {
+      "case_id": "X04",
+      "type": "declaration",
+      "selected": ["JOKER_SMALL@0", "JOKER_SMALL@1", "JOKER_BIG@0", "JOKER_BIG@1"],
+      "expected_declarations": [
+        {"move_kind": "JOKER_BOMB", "length": 4, "main_rank": 16, "wild_bindings": []}
+      ],
+      "note": "天王炸弹=两大王+两小王（四张真实王）；main_rank 记为16(大王)，比较时唯一最大"
+    },
+    {
+      "case_id": "R23",
+      "type": "error",
+      "selected": ["S3@0", "S3@0"],
+      "expected_error": "DUPLICATE_CARD_ID",
+      "note": "相同 card_id 重复两次，返回 DUPLICATE_CARD_ID，不会当成对子"
+    },
+    {
+      "case_id": "X10",
+      "type": "error",
+      "selected_ids": [0, 108],
+      "expected_error": "CARD_ID_OUT_OF_RANGE",
+      "note": "card_id 越界（有效范围0-107）；域级错误码，HTTP 边界映射为 422 SCHEMA_INVALID（T3/T7 确认）"
+    },
+    {
+      "case_id": "R02",
+      "type": "comparison",
+      "challenger": {"selected": ["S2@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 2},
+      "previous": {"selected": ["SA@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 14},
+      "expected_can_beat": true,
+      "note": "单张级牌2 > 单张A（级牌提升，仍低于小王）"
+    },
+    {
+      "case_id": "X05",
+      "type": "comparison",
+      "challenger": {"selected": ["SA@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 14},
+      "previous": {"selected": ["SK@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 13},
+      "expected_can_beat": true,
+      "note": "同型单张，高点A压K"
+    },
+    {
+      "case_id": "X06",
+      "type": "comparison",
+      "challenger": {"selected": ["SA@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 14},
+      "previous": {"selected": ["SA@1"], "move_kind": "SINGLE", "length": 1, "main_rank": 14},
+      "expected_can_beat": false,
+      "note": "同型同点不能压"
+    },
+    {
+      "case_id": "X07",
+      "type": "comparison",
+      "challenger": {"selected": ["S2@0", "D3@0", "C4@0", "H5@0", "S6@0"], "move_kind": "STRAIGHT", "length": 5, "main_rank": 6},
+      "previous": {"selected": ["SA@0", "S2@1", "D3@1", "C4@1", "H5@1"], "move_kind": "STRAIGHT", "length": 5, "main_rank": 5},
+      "expected_can_beat": true,
+      "note": "序列按自然高端点比较，级牌2不提升：23456(高端点6) > A2345(高端点5)"
+    },
+    {
+      "case_id": "X08",
+      "type": "comparison",
+      "challenger": {"selected": ["SA@0", "HA@0"], "move_kind": "PAIR", "length": 2, "main_rank": 14},
+      "previous": {"selected": ["SK@0", "HK@0"], "move_kind": "PAIR", "length": 2, "main_rank": 13},
+      "expected_can_beat": true,
+      "note": "同型对子，A对压K对"
+    },
+    {
+      "case_id": "X09",
+      "type": "comparison",
+      "challenger": {"selected": ["S2@0", "D2@0"], "move_kind": "PAIR", "length": 2, "main_rank": 2},
+      "previous": {"selected": ["SA@0", "HA@0"], "move_kind": "PAIR", "length": 2, "main_rank": 14},
+      "expected_can_beat": true,
+      "note": "级牌对子(2) > A对子（级牌提升）"
+    },
+    {
+      "case_id": "R18a",
+      "type": "comparison",
+      "challenger": {"selected": ["S8@0", "H8@0", "D8@0", "C8@0", "S8@1"], "move_kind": "BOMB", "length": 5, "main_rank": 8},
+      "previous": {"selected": ["S3@0", "H3@0", "D3@0", "C3@0"], "move_kind": "BOMB", "length": 4, "main_rank": 3},
+      "expected_can_beat": true,
+      "note": "5张炸弹 > 4张炸弹（张数优先于点数）"
+    },
+    {
+      "case_id": "R18b",
+      "type": "comparison",
+      "challenger": {"selected": ["SA@0", "S2@0", "S3@0", "S4@0", "S5@0"], "move_kind": "STRAIGHT_FLUSH", "length": 5, "main_rank": 5},
+      "previous": {"selected": ["SA@1", "HA@1", "DA@1", "CA@0", "HA@0"], "move_kind": "BOMB", "length": 5, "main_rank": 14},
+      "expected_can_beat": true,
+      "note": "同花顺 > 5张炸弹（即使同花顺高端点低、炸弹点数高）"
+    },
+    {
+      "case_id": "R18c",
+      "type": "comparison",
+      "challenger": {"selected": ["S3@0", "H3@0", "D3@0", "C3@0", "S3@1", "H3@1"], "move_kind": "BOMB", "length": 6, "main_rank": 3},
+      "previous": {"selected": ["S10@0", "SJ@0", "SQ@0", "SK@0", "SA@0"], "move_kind": "STRAIGHT_FLUSH", "length": 5, "main_rank": 14},
+      "expected_can_beat": true,
+      "note": "6张炸弹 > 同花顺"
+    },
+    {
+      "case_id": "R18d",
+      "type": "comparison",
+      "challenger": {"selected": ["JOKER_SMALL@0", "JOKER_SMALL@1", "JOKER_BIG@0", "JOKER_BIG@1"], "move_kind": "JOKER_BOMB", "length": 4, "main_rank": 16},
+      "previous": {"selected": ["S9@0", "H9@0", "D9@0", "C9@0", "S9@1", "H9@1"], "move_kind": "BOMB", "length": 6, "main_rank": 9},
+      "expected_can_beat": true,
+      "note": "天王炸弹 > 6张炸弹（炸弹体系最高）"
+    },
+    {
+      "case_id": "R19",
+      "type": "comparison",
+      "challenger": {"selected": ["S2@0", "D2@0", "C2@0", "S2@1"], "move_kind": "BOMB", "length": 4, "main_rank": 2},
+      "previous": {"selected": ["SA@0", "HA@0", "DA@0", "SA@1"], "move_kind": "BOMB", "length": 4, "main_rank": 14},
+      "expected_can_beat": true,
+      "note": "同张数(4)炸弹，级牌2炸弹 > A炸弹（级牌提升）"
+    },
+    {
+      "case_id": "R20",
+      "type": "comparison",
+      "challenger": {"selected": ["S3@0", "S4@0", "S5@0", "S6@0", "S7@0"], "move_kind": "STRAIGHT_FLUSH", "length": 5, "main_rank": 7},
+      "previous": {"selected": ["H3@0", "H4@0", "H5@0", "H6@0", "H7@0"], "move_kind": "STRAIGHT_FLUSH", "length": 5, "main_rank": 7},
+      "expected_can_beat": false,
+      "note": "同大小同花顺但不同花色，谁也不能压谁（花色不分大小）"
+    },
+    {
+      "case_id": "R21a",
+      "type": "comparison",
+      "challenger": {"selected": ["SA@0"], "move_kind": "SINGLE", "length": 1, "main_rank": 14},
+      "previous": {"selected": ["S3@0", "H3@0"], "move_kind": "PAIR", "length": 2, "main_rank": 3},
+      "expected_can_beat": false,
+      "note": "单张不能压对子（普通不同牌型不能互压）"
+    },
+    {
+      "case_id": "R21b",
+      "type": "comparison",
+      "challenger": {"selected": ["S3@0", "H3@0", "D3@0"], "move_kind": "TRIPLE", "length": 3, "main_rank": 3},
+      "previous": {"selected": ["S4@0", "H4@0", "D4@0", "S5@0", "H5@0"], "move_kind": "FULL_HOUSE", "length": 5, "main_rank": 4},
+      "expected_can_beat": false,
+      "note": "三张不能压三带对（不同牌型）"
+    },
+    {
+      "case_id": "R22",
+      "type": "comparison",
+      "challenger": {"selected": ["S3@0", "H3@0", "D3@0", "S4@0", "H4@0"], "move_kind": "FULL_HOUSE", "length": 5, "main_rank": 3},
+      "previous": {"selected": ["S3@1", "H3@1", "D3@1", "S5@0", "H5@0"], "move_kind": "FULL_HOUSE", "length": 5, "main_rank": 3},
+      "expected_can_beat": false,
+      "note": "主三张相同(3)则不能靠改变带牌点数变大"
+    }
+  ]
+}

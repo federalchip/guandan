@@ -1,0 +1,463 @@
+{
+  "profile_id": "gd-v1-level2",
+  "level_rank": 2,
+  "description": "掼蛋 v1 回合/接风/结算人工预期用例（S01-S14）。expected 由 docs/rules-v1.md 第6-7节人工推导，不得由引擎输出反填。hands/trick 用符号表示（@0/@1 区分两副）；discarded 由测试取四家手牌在 108 张牌中的补集，包含所有已打出的实体牌；当前 trick 中的牌是 discarded 的子集，不额外计数。座位队伍：team0={0,2}，team1={1,3}；winner_team 为头游所属队索引。version 初值由 setup 给出，每个合法 PLAY/PASS 使其 +1，被拒动作不变。",
+  "invariants": [
+    {"id": "I1", "statement": "任意合法步骤或终态，四家手牌与 discarded 互不重叠，合起来恰为 108 个不同 CardId；当前 trick 牌均属于 discarded，不额外计数", "applies_to": "all"},
+    {"id": "I2", "statement": "非法/被拒动作不改变 hands、discarded、trick、finish_order、phase、version", "applies_to": "reject"},
+    {"id": "I3", "statement": "非终态当前玩家仍持牌；已出完玩家在轮转中被跳过", "applies_to": "all"},
+    {"id": "I4", "statement": "终态仍持牌者的牌保留在手中，不暴露隐藏牌；phase=FINISHED 时 current_player=null", "applies_to": "settlement"}
+  ],
+  "scenarios": [
+    {
+      "case_id": "S01",
+      "category": "reject",
+      "title": "领出时 PASS 被拒绝，状态与 version 不变",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": ["S5@0"], "2": ["S6@0"], "3": ["S7@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PASS"}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "PASS_NOT_ALLOWED",
+        "version": 1,
+        "current_player": 0,
+        "phase": "PLAYING"
+      }
+    },
+    {
+      "case_id": "S02",
+      "category": "reject",
+      "title": "非 current_player 出牌被拒绝，不扣牌",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": ["S5@0"], "2": ["S6@0"], "3": ["S7@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 1, "kind": "PLAY", "cards": ["S5@0"]}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "NOT_YOUR_TURN",
+        "version": 1,
+        "current_player": 0,
+        "hands_unchanged": true
+      }
+    },
+    {
+      "case_id": "S03",
+      "category": "reject",
+      "title": "使用别人的卡牌被拒绝，不扣牌",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H5@0"], "2": ["D6@0"], "3": ["C8@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["H5@0"]}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "CARD_NOT_OWNED",
+        "version": 1,
+        "current_player": 0,
+        "hands_unchanged": true
+      }
+    },
+    {
+      "case_id": "S04",
+      "category": "flow",
+      "title": "0 领出，1/2/3 都过 → 清空有效桌面牌，0 重新领出",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": ["S5@0"], "2": ["S6@0"], "3": ["S7@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PASS"},
+        {"actor": 2, "kind": "PASS"},
+        {"actor": 3, "kind": "PASS"}
+      ],
+      "expected_final": {
+        "phase": "PLAYING",
+        "current_player": 0,
+        "is_lead": true,
+        "trick_owner": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "version": 5
+      }
+    },
+    {
+      "case_id": "S05",
+      "category": "jiefeng",
+      "title": "0 最后一手出完，1/2/3 都过 → 仍持牌的搭档 2 接风",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0", "H5@0"], "2": ["D6@0", "D7@0"], "3": ["C8@0", "C9@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PASS"},
+        {"actor": 2, "kind": "PASS"},
+        {"actor": 3, "kind": "PASS"}
+      ],
+      "expected_final": {
+        "phase": "PLAYING",
+        "current_player": 2,
+        "is_lead": true,
+        "trick_owner": null,
+        "pending_responders": [],
+        "finish_order": [0],
+        "version": 5
+      },
+      "note": "0 出完最后一手且未被压住，本轮结束后由仍持牌的搭档 2 接风领出"
+    },
+    {
+      "case_id": "S06",
+      "category": "jiefeng",
+      "title": "0 最后一手出完，1 压住，2/3 都过 → 1 领出，不给 2 自动接风",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["SA@0", "H5@0"], "2": ["D6@0", "D7@0"], "3": ["C8@0", "C9@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PLAY", "cards": ["SA@0"]},
+        {"actor": 2, "kind": "PASS"},
+        {"actor": 3, "kind": "PASS"}
+      ],
+      "expected_final": {
+        "phase": "PLAYING",
+        "current_player": 1,
+        "is_lead": true,
+        "trick_owner": null,
+        "pending_responders": [],
+        "finish_order": [0],
+        "version": 5
+      },
+      "note": "0 的最后一手被 1 压住，本轮有效出牌者为 1（仍持牌），由 1 领出，不给 0 的搭档 2 接风"
+    },
+    {
+      "case_id": "S07",
+      "category": "flow",
+      "title": "某人已出完 → 轮转跳过；待响应人数按实际活跃玩家处理",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": [], "2": ["D6@0"], "3": ["C8@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [1],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]}
+      ],
+      "expected_final": {
+        "phase": "PLAYING",
+        "current_player": 2,
+        "is_lead": false,
+        "trick_owner": 0,
+        "pending_responders": [2, 3],
+        "finish_order": [1],
+        "version": 2
+      },
+      "note": "1 已出完被跳过，0 出牌后待响应集合为仍持牌的 {2,3}，下一家为 2"
+    },
+    {
+      "case_id": "S08",
+      "category": "flow",
+      "title": "1 曾过牌，2 又出牌 → 1 在后续轮转中仍可响应新牌",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": ["S5@0", "H6@0"], "2": ["SA@0", "D7@0"], "3": ["C8@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PASS"},
+        {"actor": 2, "kind": "PLAY", "cards": ["SA@0"]}
+      ],
+      "expected_final": {
+        "phase": "PLAYING",
+        "current_player": 3,
+        "is_lead": false,
+        "trick_owner": 2,
+        "pending_responders": [0, 1, 3],
+        "finish_order": [],
+        "version": 4
+      },
+      "note": "1 过牌后 2 出新牌，待响应集合重置为除 2 外仍持牌者 {0,1,3}，1 重新可响应"
+    },
+    {
+      "case_id": "S09",
+      "category": "settlement",
+      "title": "实际出完顺序 [0,2] → 立即结束，双下 ((0,),(2,),(1,3))",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0", "H5@0"], "2": ["D6@0"], "3": ["C8@0", "C9@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PASS"},
+        {"actor": 2, "kind": "PLAY", "cards": ["D6@0"]}
+      ],
+      "expected_final": {
+        "phase": "FINISHED",
+        "current_player": null,
+        "finish_order": [0, 2],
+        "result": {
+          "winner_team": 0,
+          "placement_groups": [[0], [2], [1, 3]],
+          "outcome": "DOUBLE_UP"
+        },
+        "version": 4
+      },
+      "note": "0 与 2 同队包揽头游二游，2 出完即触发双下结算，不虚构 1/3 的第三第四顺序"
+    },
+    {
+      "case_id": "S10",
+      "category": "settlement",
+      "title": "实际出完顺序 [0,1,2] → 结束，3 自动末游，手牌仍保留",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0"], "2": ["D5@0"], "3": ["C8@0", "C9@0", "C10@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PLAY", "cards": ["H4@0"]},
+        {"actor": 2, "kind": "PLAY", "cards": ["D5@0"]}
+      ],
+      "expected_final": {
+        "phase": "FINISHED",
+        "current_player": null,
+        "finish_order": [0, 1, 2],
+        "remaining_hands": {"3": ["C8@0", "C9@0", "C10@0"]},
+        "result": {
+          "winner_team": 0,
+          "placement_groups": [[0], [1], [2], [3]],
+          "outcome": "TEAMMATE_THIRD"
+        },
+        "version": 4,
+        "conservation": true
+      },
+      "note": "第三名 2 出完后结束，3 自动末游且未出的牌保留在手中；头游 0 的搭档 2 为第三 → TEAMMATE_THIRD"
+    },
+    {
+      "case_id": "S11",
+      "category": "settlement",
+      "title": "实际出完顺序 [0,1,3] → 结束，2 自动末游，头游队为赢家",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0"], "2": ["D5@0", "D6@0"], "3": ["C7@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PLAY", "cards": ["H4@0"]},
+        {"actor": 2, "kind": "PASS"},
+        {"actor": 3, "kind": "PLAY", "cards": ["C7@0"]}
+      ],
+      "expected_final": {
+        "phase": "FINISHED",
+        "current_player": null,
+        "finish_order": [0, 1, 3],
+        "remaining_hands": {"2": ["D5@0", "D6@0"]},
+        "result": {
+          "winner_team": 0,
+          "placement_groups": [[0], [1], [3], [2]],
+          "outcome": "TEAMMATE_LAST"
+        },
+        "version": 5,
+        "conservation": true
+      },
+      "note": "2 过牌后 3 出完触发结算，2 自动末游并保留手牌；头游 0 的搭档 2 为末游 → TEAMMATE_LAST"
+    },
+    {
+      "case_id": "S12",
+      "category": "settlement",
+      "title": "真人(0)首先出完 → 引擎在 1/2/3 间继续推进至结算，不等待 0",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0"], "2": ["D5@0"], "3": ["C6@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PLAY", "cards": ["H4@0"]},
+        {"actor": 2, "kind": "PLAY", "cards": ["D5@0"]}
+      ],
+      "expected_final": {
+        "phase": "FINISHED",
+        "current_player": null,
+        "finish_order": [0, 1, 2],
+        "remaining_hands": {"3": ["C6@0"]},
+        "result": {
+          "winner_team": 0,
+          "placement_groups": [[0], [1], [2], [3]],
+          "outcome": "TEAMMATE_THIRD"
+        },
+        "version": 4,
+        "current_player_never_after_finish": 0
+      },
+      "note": "0 出完后不再成为 current_player；引擎在 1/2/3 间继续，第三名出完即结算。完整机器人自动推进在 T6/T7/M2 验证"
+    },
+    {
+      "case_id": "S13a",
+      "category": "reject",
+      "title": "非法动作（无有效牌型）→ state 与 version 不变",
+      "setup": {
+        "hands": {"0": ["S3@0", "H5@0"], "1": ["S6@0"], "2": ["D7@0"], "3": ["C8@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0", "H5@0"]}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "INVALID_MOVE",
+        "version": 1,
+        "hands_unchanged": true
+      }
+    },
+    {
+      "case_id": "S13b",
+      "category": "reject",
+      "title": "多声明未选（PLAY 未带 interpretation_key）→ AMBIGUOUS_DECLARATION，state 与 version 不变",
+      "setup": {
+        "hands": {"0": ["S3@0", "S4@0", "S5@0", "S6@0", "H2@0"], "1": ["S8@0"], "2": ["D9@0"], "3": ["C10@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0", "S4@0", "S5@0", "S6@0", "H2@0"]}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "AMBIGUOUS_DECLARATION",
+        "version": 1,
+        "hands_unchanged": true,
+        "returns_choices": true
+      },
+      "note": "该选牌支持 P06 的四个声明，未带键时返回 AMBIGUOUS_DECLARATION 与有效 choices"
+    },
+    {
+      "case_id": "S13c",
+      "category": "reject",
+      "title": "重复实体 → DUPLICATE_CARD_ID，state 与 version 不变",
+      "setup": {
+        "hands": {"0": ["S3@0", "H4@0"], "1": ["S6@0"], "2": ["D7@0"], "3": ["C8@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0", "S3@0"]}
+      ],
+      "expected": {
+        "rejected": true,
+        "error": "DUPLICATE_CARD_ID",
+        "version": 1,
+        "hands_unchanged": true
+      }
+    },
+    {
+      "case_id": "S14",
+      "category": "invariant",
+      "title": "任意合法步骤/终态 → 四家手牌与 discarded 合计 108 个不同 ID，trick 包含于 discarded",
+      "setup": {
+        "hands": {"0": ["S3@0"], "1": ["H4@0"], "2": ["D5@0"], "3": ["C8@0", "C9@0", "C10@0"]},
+        "current_player": 0,
+        "trick": null,
+        "pending_responders": [],
+        "finish_order": [],
+        "phase": "PLAYING",
+        "version": 1
+      },
+      "steps": [
+        {"actor": 0, "kind": "PLAY", "cards": ["S3@0"]},
+        {"actor": 1, "kind": "PLAY", "cards": ["H4@0"]},
+        {"actor": 2, "kind": "PLAY", "cards": ["D5@0"]}
+      ],
+      "check_each_step": {
+        "conservation": true,
+        "distinct_ids": 108,
+        "no_overlap": true,
+        "trick_subset_of_discarded": true
+      },
+      "expected_final": {
+        "phase": "FINISHED",
+        "conservation": true,
+        "remaining_hands": {"3": ["C8@0", "C9@0", "C10@0"]}
+      },
+      "note": "复用 S10 终态；测试在每一步与终态校验 108 张守恒。discarded 取四家手牌在整副牌中的补集；no_overlap 指手牌之间及手牌与 discarded 之间不重叠，trick 牌必须已在 discarded 中。"
+    }
+  ]
+}

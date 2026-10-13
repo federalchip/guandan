@@ -1,0 +1,6 @@
+/target/
+/artifacts/
+/.classpath
+/.project
+/.settings/
+*.iml
