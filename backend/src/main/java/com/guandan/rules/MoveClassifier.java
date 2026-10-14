@@ -38,8 +38,6 @@ public final class MoveClassifier {
         CARD_BY_ID = Map.copyOf(map);
     }
 
-    private static final int MIN_CARD_ID = 0;
-    private static final int MAX_CARD_ID = 107;
     private static final int SMALL_JOKER = 15;
     private static final int BIG_JOKER = 16;
     private static final int MIN_RANK = 2;
@@ -54,7 +52,7 @@ public final class MoveClassifier {
         if (cardIds == null) {
             return List.of();
         }
-        validate(cardIds);
+        CardIdValidator.validate(cardIds);
         int n = cardIds.size();
         if (n == 0 || n > 10) {
             return List.of();
@@ -107,20 +105,6 @@ public final class MoveClassifier {
             }
         }
         return toMoves(decls, sortedIds, n, wildIds, profile);
-    }
-
-    private static void validate(List<Integer> cardIds) {
-        Set<Integer> seen = new HashSet<>();
-        for (int id : cardIds) {
-            if (id < MIN_CARD_ID || id > MAX_CARD_ID) {
-                throw new GameRuleException("CARD_ID_OUT_OF_RANGE", "card_id 越界: " + id,
-                        Map.of("card_id", id));
-            }
-            if (!seen.add(id)) {
-                throw new GameRuleException("DUPLICATE_CARD_ID", "重复 card_id: " + id,
-                        Map.of("card_id", id));
-            }
-        }
     }
 
     private static boolean isWild(Card card, RuleProfile profile) {
