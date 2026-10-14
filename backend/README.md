@@ -1,6 +1,6 @@
 # 掼蛋 v1 后端工程
 
-此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–C：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较；另有应用启动和 `GET /api/v1/health`。合法动作生成器、牌局状态机、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
+此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–E：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较、测试专用独立参照 `SmallHandOracle`、生产合法动作生成器 `LegalMoveGenerator`（与参照双向语义对照）及 T4c 固定复杂手牌基准；另有应用启动和 `GET /api/v1/health`。牌局状态机、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
 
 ## 环境
 
