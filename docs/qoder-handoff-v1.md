@@ -7,7 +7,7 @@
 - `backend/pom.xml`：Spring MVC、Validation、JUnit/MockMvc、QuickTheories；Maven Wrapper 3.3.4/Maven 3.9.11；`slow`/`performance` 标签配置；JDK 17 编译目标。
 - `GuandanApplication`：Spring Boot 启动入口；`application.yml`：端口 8000。
 - `HealthController` 和 `HealthControllerTest`：无会话的 `/api/v1/health`，已用真实 JAR 启动核对。
-- A–E 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）及 T4c 固定复杂手牌基准（`GenerationBenchmarkTest` 输出 `artifacts/t4-generation-baseline.json`，含 CPU 型号、首次计算与稳态分位数）与对应测试。尚无牌局状态机、机器人、游戏 API、前端或 CLI；现有测试通过不代表 MVP 已完成。
+- A–E 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）及 T4c 固定复杂手牌基准（`GenerationBenchmarkTest` 输出 `artifacts/t4-generation-baseline.json`，含 CPU 型号、各场景预热前调用耗时与预热后稳态分位数）与对应测试。尚无牌局状态机、机器人、游戏 API、前端或 CLI；现有测试通过不代表 MVP 已完成。
 - 回合 fixture 的守恒口径为“四家手牌 + `discarded` = 108 个不同 CardId”；当前 `trick` 牌属于 `discarded`，不额外计数。短手牌场景由测试按四家手牌在整副牌中的补集构造 `discarded`。
 
 ## 交付顺序和可分配任务
@@ -41,4 +41,4 @@ A–E 已交付；下一批从 F（T5–T7 牌局、机器人、API）开始，G
 
 ## 可直接交给 Qoder 的下一批指令
 
-> 请在 `E:\professional_class\guandan` 中从 D（T4a 独立参照）开始，按主计划分别验收 D 与 E（T4b–T4c 生成器与固定复杂手牌基准），暂不开始 T5 或前端。先通读 `2026-10-06-guandan-v1-mvp.md` 的 T4 合同、`docs/rules-v1.md` 和两份人工 fixture；独立参照不能调用生产判定、比较或生成器，也不能用生产输出反填人工预期。完成 D 后再实现 E，并按任务单运行指定的正确性测试与性能基准。交付时列出变更文件、实际命令与结果、基准数据及未解决问题；回合 fixture 的牌数守恒按“四家手牌 + discarded = 108、trick ⊆ discarded”执行。
+> 请在 `E:\professional_class\guandan` 中从 F 的 T5（纯牌局状态机、接风与结果）开始，先通读 `2026-10-06-guandan-v1-mvp.md` 的 T5 合同、`docs/rules-v1.md` 和 `backend/src/test/resources/fixtures/turn_cases.json`。使用已交付的 A–E 代码与人工预期，先完成 T5 的状态转移、结算、隐藏信息测试及单独验收；随后按主计划依次交付并验收 T6 机器人与 M2 初测、T7 会话和 HTTP 接口。暂不开始 G 的前端任务。每个合法步骤按“四家手牌 + discarded = 108 个不同 CardId、trick ⊆ discarded”检查守恒；非法动作保持状态与 version 不变。各任务交付时列出变更文件、实际测试命令与结果、未解决问题和下一任务依赖。

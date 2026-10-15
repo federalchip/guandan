@@ -129,7 +129,8 @@ class GenerationBenchmarkTest {
             List<Integer> ids = idsOf(hand, "card_ids");
             for (String scenario : new String[] {"lead", "follow_pair_10"}) {
                 Move prev = scenario.equals("lead") ? null : previous;
-                // 首次计算（冷启动：未经预热/JIT，含首次类初始化与手牌索引构建），单独记录，不并入稳态分位数
+                // 该场景预热前的首次调用；同一测试进程可能已运行其他场景或校验测试，不代表 JVM 冷启动。
+                // 单独记录，不并入稳态分位数。
                 long firstStart = System.nanoTime();
                 int candidates = LegalMoveGenerator.generateLegalMoves(ids, prev, PROFILE).size();
                 double firstCallMs = (System.nanoTime() - firstStart) / 1e6;
@@ -214,7 +215,7 @@ class GenerationBenchmarkTest {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("all_meet_p95_target", allMeet);
         summary.put("max_p95_ms", round3(maxP95));
-        summary.put("note", "T4c 建立基线；first_call_ms 为冷启动首次计算耗时，p50/p95/max 为预热后稳态；"
+        summary.put("note", "T4c 建立基线；first_call_ms 为各场景预热前的一次调用耗时，并非 JVM 冷启动；p50/p95/max 为预热后稳态；"
                 + "无结果缓存，每次调用重新计算，不以缓存命中替代首次计算性能。达标与否如实记录，"
                 + "未达标差距进入 T10 完整性能验收，不通过减少合法候选提速。");
         report.put("summary", summary);
