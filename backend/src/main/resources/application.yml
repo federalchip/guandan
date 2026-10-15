@@ -1,2 +1,13 @@
 server:
   port: 8000
+
+spring:
+  jackson:
+    # 传输 DTO 显式 snake_case；未知字段拒绝；标量不强制转换（"5"/5.0/true 不得当成整数）
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: always
+    deserialization:
+      fail-on-unknown-properties: true
+      accept-float-as-int: false
+    mapper:
+      allow-coercion-of-scalars: false
