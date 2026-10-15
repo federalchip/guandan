@@ -7,7 +7,7 @@
 - `backend/pom.xml`：Spring MVC、Validation、JUnit/MockMvc、QuickTheories；Maven Wrapper 3.3.4/Maven 3.9.11；`slow`/`performance` 标签配置；JDK 17 编译目标。
 - `GuandanApplication`：Spring Boot 启动入口；`application.yml`：端口 8000。
 - `HealthController` 和 `HealthControllerTest`：无会话的 `/api/v1/health`，已用真实 JAR 启动核对。
-- A–E 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）及 T4c 固定复杂手牌基准（`GenerationBenchmarkTest` 输出 `artifacts/t4-generation-baseline.json`，含 CPU 型号、各场景预热前调用耗时与预热后稳态分位数）与对应测试。尚无牌局状态机、机器人、游戏 API、前端或 CLI；现有测试通过不代表 MVP 已完成。
+- A–F 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）、T4c 固定复杂手牌基准、纯牌局状态机 `GameEngine`（回合/接风/结算，消费 `turn_cases.json`）+ `PlayerViewFactory`（隐藏信息过滤）、随机合法机器人 `RandomLegalPolicy`/`BotSeeds` + `M2SmokeTest` 20 局耗时基线、内存服务 `GameService`/`InMemoryGameStore`（每局锁/幂等/批次回滚/512 步保护）+ `GameController`/DTO/`ApiExceptionHandler`（会话令牌、错误码→状态映射，见 `docs/api-v1.md`）及对应测试。尚无前端页面或 CLI；现有测试通过不代表 MVP 已完成。
 - 回合 fixture 的守恒口径为“四家手牌 + `discarded` = 108 个不同 CardId”；当前 `trick` 牌属于 `discarded`，不额外计数。短手牌场景由测试按四家手牌在整副牌中的补集构造 `discarded`。
 
 ## 交付顺序和可分配任务
@@ -22,7 +22,7 @@
 | F：T5–T7 牌局、机器人、API | 在 E 后分阶段交付 | 状态机/接风/结算→合法随机机器人及 M2 20 局耗时→内存服务、DTO、幂等和 HTTP；每阶段依主计划单独验收 | 每个动作检查四家手牌与 `discarded` 合计 108 个不同 ID，且 `trick` 牌属于 `discarded`；M2 输出整局耗时；服务端同 request_id 不重复扣牌、批次失败回滚、对手手牌不可见 |
 | G：T8–T11 页面与完整验收 | API 合同稳定后交付 | Vue 牌桌、声明选择、按 `{game_id, command}` 恢复、浏览器 E2E、T10 模拟与性能 | 页面“开始一局”“再来一局”；T10 做完整性能验收，T11 做浏览器与交付验收 |
 
-A–E 已交付；下一批从 F（T5–T7 牌局、机器人、API）开始，G（T8–T11 页面与完整验收）在 API 合同稳定后交付。F/G 不宜与 D/E 同时改规则合同或共享类；若多人并行，只并行各自拥有的文件，接口变更先写入主计划和 fixture。项目已建立本地 Git 仓库；提交与推送分别记录，不能用提交成功代替测试验收。
+A–F 已交付；下一批从 G（T8–T11 页面与完整验收）开始，在 API 合同（`docs/api-v1.md`）稳定后交付。G 不宜与后端同时改规则合同或共享类；若多人并行，只并行各自拥有的文件，接口变更先写入主计划和 fixture。项目已建立本地 Git 仓库；提交与推送分别记录，不能用提交成功代替测试验收。
 
 ## 每包统一实践
 

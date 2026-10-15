@@ -1,6 +1,6 @@
 # 掼蛋 v1 后端工程
 
-此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–E：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较、测试专用独立参照 `SmallHandOracle`、生产合法动作生成器 `LegalMoveGenerator`（与参照双向语义对照）及 T4c 固定复杂手牌基准；另有应用启动和 `GET /api/v1/health`。牌局状态机、机器人及 `/games` 接口尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
+此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–F：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较、独立参照 `SmallHandOracle`、生产生成器 `LegalMoveGenerator` 与 T4c 基准、纯牌局状态机 `GameEngine` + `PlayerViewFactory`、随机合法机器人 `RandomLegalPolicy` + M2 耗时基线、内存服务 `GameService`/`InMemoryGameStore` 与 `/api/v1/games` HTTP 接口（会话/幂等/每局锁/错误映射，见 [api-v1](../docs/api-v1.md)）；另有应用启动和 `GET /api/v1/health`。前端页面与 CLI 尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
 
 ## 环境
 
@@ -17,7 +17,7 @@
 java -jar target/guandan-v1.jar
 ```
 
-服务默认监听 8000 端口。另开终端访问 `http://127.0.0.1:8000/api/v1/health`，应收到 `{"status":"UP"}`。`/api/v1/games` 尚不存在，不能用健康检查代替游戏功能验收。
+服务默认监听 8000 端口。另开终端访问 `http://127.0.0.1:8000/api/v1/health`，应收到 `{"status":"UP"}`。游戏接口 `POST /api/v1/games`（创建）、`GET /api/v1/games/{id}`、`/legal-actions`、`POST /resolve`、`POST /actions` 均已实现，除创建外需 `Authorization: Bearer <session_token>`；字段与错误码见 [api-v1](../docs/api-v1.md)。健康检查不能代替游戏功能验收。
 
 回合 fixture 的 108 张守恒口径：四家手牌与 `discarded` 互不重叠且合计 108 个不同 CardId；当前 `trick` 的牌已在 `discarded` 中，不再另加一次。短手牌 fixture 中未参与的牌也放入 `discarded`。
 
