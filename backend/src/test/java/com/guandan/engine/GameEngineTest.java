@@ -5,9 +5,14 @@ import com.guandan.domain.CardIds;
 import com.guandan.domain.Deck;
 import com.guandan.domain.RuleProfile;
 import com.guandan.domain.model.Action;
+import com.guandan.domain.model.ActionKind;
+import com.guandan.domain.model.DomainEvent;
 import com.guandan.domain.model.EngineOutcome;
+import com.guandan.domain.model.EventType;
 import com.guandan.domain.model.GameRuleException;
 import com.guandan.domain.model.GameState;
+import com.guandan.domain.model.Move;
+import com.guandan.domain.model.MoveKind;
 import com.guandan.domain.model.Outcome;
 import com.guandan.domain.model.Phase;
 import org.junit.jupiter.api.Test;
@@ -17,6 +22,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -182,6 +188,131 @@ class GameEngineTest {
         GameRuleException ex = assertThrows(GameRuleException.class,
                 () -> GameEngine.resolveSelection(afterLead, 1, CardIds.parse("SA@0")));
         assertEquals("CARD_NOT_OWNED", ex.code());
+    }
+
+    // ---- 动作结构校验（SCHEMA_INVALID）----
+
+    @Test
+    void test_pass_carrying_cards_is_rejected() {
+        GameState following = GameEngine.applyAction(
+                TurnFixtures.initialState(TurnFixtures.scenario("S04")), 0,
+                Action.play(CardIds.parse("S3@0"), null)).state();
+        long vBefore = following.version();
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> GameEngine.applyAction(following, 1,
+                        new Action(ActionKind.PASS, CardIds.parse("S5@0"), null)));
+        assertEquals("SCHEMA_INVALID", ex.code(), "带牌 PASS 结构非法");
+        assertEquals(vBefore, following.version(), "被拒后 version 不变");
+        // 对照：同局面合法 PASS 被接受，证明拒绝源于动作结构而非局面
+        assertEquals(vBefore + 1, GameEngine.applyAction(following, 1, Action.pass()).state().version());
+    }
+
+    @Test
+    void test_pass_carrying_interpretation_key_is_rejected() {
+        GameState following = GameEngine.applyAction(
+                TurnFixtures.initialState(TurnFixtures.scenario("S04")), 0,
+                Action.play(CardIds.parse("S3@0"), null)).state();
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> GameEngine.applyAction(following, 1,
+                        new Action(ActionKind.PASS, List.of(), "gd-v1-level2|SINGLE|1|3|8")));
+        assertEquals("SCHEMA_INVALID", ex.code(), "带声明键 PASS 结构非法");
+    }
+
+    @Test
+    void test_null_kind_action_is_rejected() {
+        GameState s = TurnFixtures.initialState(TurnFixtures.scenario("S04"));
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> GameEngine.applyAction(s, 0, new Action(null, CardIds.parse("S3@0"), null)));
+        assertEquals("SCHEMA_INVALID", ex.code(), "kind=null 不得落入 PLAY 分支");
+        assertEquals(1L, s.version());
+    }
+
+    @Test
+    void test_play_without_cards_is_rejected() {
+        GameState s = TurnFixtures.initialState(TurnFixtures.scenario("S04"));
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> GameEngine.applyAction(s, 0, Action.play(List.of(), null)));
+        assertEquals("SCHEMA_INVALID", ex.code(), "PLAY 必须携带牌");
+        assertEquals(1L, s.version());
+    }
+
+    @Test
+    void test_null_action_is_rejected() {
+        GameState s = TurnFixtures.initialState(TurnFixtures.scenario("S04"));
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> GameEngine.applyAction(s, 0, null));
+        assertEquals("SCHEMA_INVALID", ex.code());
+    }
+
+    // ---- PLAYED 事件携带完整公开声明 ----
+
+    @Test
+    void test_played_event_carries_wild_binding_without_suit() {
+        // 0 手持 S3@0 + 百搭 H2@0，领出组成对3：百搭充当 3，非顺子 suit 为 null
+        List<Integer> p0 = CardIds.parse("S3@0 H2@0");
+        GameState s = stateWithHands(List.of(
+                p0, CardIds.parse("S5@0"), CardIds.parse("S6@0"), CardIds.parse("S7@0")));
+        EngineOutcome out = GameEngine.applyAction(s, 0, Action.play(p0, null));
+        Map<String, Object> p = playedPayload(out);
+        assertEquals("PAIR", p.get("kind"));
+        assertEquals(3, ((Number) p.get("main_rank")).intValue());
+        assertEquals(2, ((Number) p.get("length")).intValue());
+        assertEquals(0, ((Number) p.get("remaining")).intValue());
+        assertNotNull(p.get("interpretation_key"));
+        @SuppressWarnings("unchecked")
+        List<Integer> cards = (List<Integer>) p.get("cards");
+        assertEquals(2, cards.size());
+        assertTrue(cards.containsAll(List.of(1, 4)), "cards 含 H2@0(1) 与 S3@0(4)");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> bindings = (List<Map<String, Object>>) p.get("wild_bindings");
+        assertEquals(1, bindings.size());
+        assertEquals(1, ((Number) bindings.get(0).get("card_id")).intValue(), "百搭实体 H2@0=1");
+        assertEquals(3, ((Number) bindings.get(0).get("rank")).intValue());
+        assertNull(bindings.get(0).get("suit"), "非顺子 suit 为 null");
+    }
+
+    @Test
+    void test_played_event_straight_flush_binding_has_suit() {
+        // S3-S6 + 百搭 → 同花顺，百搭充当黑桃；事件 suit 应为所声明花色 "S"
+        List<Integer> p0 = CardIds.parse("S3@0 S4@0 S5@0 S6@0 H2@0");
+        GameState s = stateWithHands(List.of(
+                p0, CardIds.parse("S8@0"), CardIds.parse("S9@0"), CardIds.parse("S10@0")));
+        Move sf = GameEngine.resolveSelection(s, 0, p0).stream()
+                .filter(d -> d.kind() == MoveKind.STRAIGHT_FLUSH)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("应存在同花顺声明"));
+        EngineOutcome out = GameEngine.applyAction(s, 0, Action.play(p0, sf.interpretationKey()));
+        Map<String, Object> p = playedPayload(out);
+        assertEquals("STRAIGHT_FLUSH", p.get("kind"));
+        assertEquals(sf.mainRank(), ((Number) p.get("main_rank")).intValue());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> bindings = (List<Map<String, Object>>) p.get("wild_bindings");
+        assertEquals(1, bindings.size());
+        assertEquals(1, ((Number) bindings.get(0).get("card_id")).intValue());
+        assertEquals("S", bindings.get(0).get("suit"), "同花顺 suit 为所声明花色");
+    }
+
+    private static Map<String, Object> playedPayload(EngineOutcome out) {
+        DomainEvent played = out.events().stream()
+                .filter(e -> e.eventType() == EventType.PLAYED)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("应有 PLAYED 事件"));
+        assertEquals(0, played.actorId());
+        return played.payload();
+    }
+
+    private static GameState stateWithHands(List<List<Integer>> hands) {
+        Set<Integer> union = new HashSet<>();
+        for (List<Integer> h : hands) {
+            union.addAll(h);
+        }
+        List<Integer> discarded = new ArrayList<>();
+        for (int id = 0; id < Deck.TOTAL_CARDS; id++) {
+            if (!union.contains(id)) {
+                discarded.add(id);
+            }
+        }
+        return new GameState(PROFILE, hands, discarded, 0, null, List.of(), Phase.PLAYING, null, 1L);
     }
 
     // ---- 人工 fixture 全量重放 ----

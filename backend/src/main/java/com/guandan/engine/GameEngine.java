@@ -14,6 +14,7 @@ import com.guandan.domain.model.Move;
 import com.guandan.domain.model.Outcome;
 import com.guandan.domain.model.Phase;
 import com.guandan.domain.model.Trick;
+import com.guandan.domain.model.WildBinding;
 import com.guandan.rules.LegalMoveGenerator;
 import com.guandan.rules.MoveClassifier;
 import com.guandan.rules.MoveComparator;
@@ -76,6 +77,7 @@ public final class GameEngine {
     /** 对单个合法 PLAY/PASS 做纯转移，version+1；无效动作抛 {@link GameRuleException} 且不改动输入。 */
     public static EngineOutcome applyAction(GameState state, int playerId, Action action) {
         requirePlaying(state);
+        requireWellFormedAction(action);
         requireCurrentPlayer(state, playerId);
         List<DomainEvent> events = new ArrayList<>();
         return action.kind() == ActionKind.PASS
@@ -212,6 +214,26 @@ public final class GameEngine {
         }
     }
 
+    /**
+     * 动作结构校验：kind 必填；PASS 不得携带牌或声明键（合同为 {@code {kind:"PASS"}}），
+     * PLAY 必须携带至少一张牌。结构不合法统一抛 SCHEMA_INVALID（主计划映射 422），
+     * 避免 null kind 落入 PLAY 分支或带牌 PASS 被当成合法过牌执行。
+     */
+    private static void requireWellFormedAction(Action action) {
+        if (action == null || action.kind() == null) {
+            throw new GameRuleException("SCHEMA_INVALID", "动作缺少 kind", Map.of());
+        }
+        if (action.kind() == ActionKind.PASS) {
+            if (!action.cardIds().isEmpty() || action.interpretationKey() != null) {
+                throw new GameRuleException("SCHEMA_INVALID", "PASS 不得携带牌或声明键",
+                        Map.of("kind", ActionKind.PASS.name()));
+            }
+        } else if (action.cardIds().isEmpty()) {
+            throw new GameRuleException("SCHEMA_INVALID", "PLAY 必须携带至少一张牌",
+                    Map.of("kind", ActionKind.PLAY.name()));
+        }
+    }
+
     private static void requireCurrentPlayer(GameState state, int playerId) {
         Integer cp = state.currentPlayer();
         if (cp == null || cp.intValue() != playerId) {
@@ -331,8 +353,25 @@ public final class GameEngine {
         payload.put("kind", move.kind().name());
         payload.put("main_rank", move.mainRank());
         payload.put("length", move.length());
+        if (move.interpretationKey() != null) {
+            payload.put("interpretation_key", move.interpretationKey());
+        }
+        payload.put("wild_bindings", wildBindingsPayload(move));
         payload.put("remaining", remaining);
         return new DomainEvent(EventType.PLAYED, playerId, payload);
+    }
+
+    /** 百搭绑定公开载荷：{card_id, rank, suit}；仅同花顺 suit 为所声明花色，其余为 null。 */
+    private static List<Map<String, Object>> wildBindingsPayload(Move move) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (WildBinding wb : move.wildBindings()) {
+            Map<String, Object> b = new LinkedHashMap<>();
+            b.put("card_id", wb.cardId());
+            b.put("rank", wb.rank());
+            b.put("suit", wb.suit() == null ? null : wb.suit().name());
+            out.add(b);
+        }
+        return out;
     }
 
     private static DomainEvent trickClosedEvent(Integer nextLeader) {
