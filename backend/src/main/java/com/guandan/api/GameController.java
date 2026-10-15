@@ -57,8 +57,7 @@ public class GameController {
     public ResolveResponse resolve(@PathVariable("id") String id,
                                    @RequestHeader(value = "Authorization", required = false) String auth,
                                    @RequestBody ResolveRequest body) {
-        body.validate();
-        return service.resolve(id, bearer(auth), body.expectedVersion(), body.cardIds());
+        return service.resolve(id, bearer(auth), body);
     }
 
     @PostMapping("/games/{id}/actions")

@@ -8,6 +8,7 @@ import com.guandan.api.dto.DtoMapper;
 import com.guandan.api.dto.EventView;
 import com.guandan.api.dto.GameView;
 import com.guandan.api.dto.LegalActionsResponse;
+import com.guandan.api.dto.ResolveRequest;
 import com.guandan.api.dto.ResolveResponse;
 import com.guandan.bots.BotSeeds;
 import com.guandan.domain.RuleProfile;
@@ -25,6 +26,7 @@ import com.guandan.rules.LegalMoveGenerator;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
@@ -42,8 +44,6 @@ public class GameService {
     private static final RuleProfile PROFILE = RuleProfile.v1();
     private static final int HUMAN_SEAT = 0;
     private static final int MAX_BOT_STEPS = 512;
-    private static final int MIN_CARDS = 1;
-    private static final int MAX_CARDS = 10;
 
     private final InMemoryGameStore store;
     private final GameSeedSource seedSource;
@@ -78,15 +78,14 @@ public class GameService {
         }
     }
 
-    public ResolveResponse resolve(String gameId, String sessionToken, long expectedVersion,
-                                   List<Integer> cardIds) {
-        validateCardIds(cardIds);
+    public ResolveResponse resolve(String gameId, String sessionToken, ResolveRequest request) {
         GameRecord rec = authorize(gameId, sessionToken);
         rec.lock.lock();
         try {
+            request.validate();
             GameState state = rec.state;
-            requireVersion(state, expectedVersion);
-            List<Move> choices = GameEngine.resolveSelection(state, HUMAN_SEAT, cardIds);
+            requireVersion(state, request.expectedVersion());
+            List<Move> choices = GameEngine.resolveSelection(state, HUMAN_SEAT, request.cardIds());
             return new ResolveResponse(state.version(), DtoMapper.toMoveViews(choices));
         } finally {
             rec.lock.unlock();
@@ -113,11 +112,11 @@ public class GameService {
     }
 
     public CommandResponse submit(String gameId, String sessionToken, CommandRequest command) {
-        command.validate();
         GameRecord rec = authorize(gameId, sessionToken);
         rec.lock.lock();
         try {
-            String fingerprint = fingerprint(command);
+            command.validate();
+            List<Object> fingerprint = fingerprint(command);
             CachedCommand cached = rec.idempotency.get(command.requestId());
             if (cached != null) {
                 if (cached.fingerprint().equals(fingerprint)) {
@@ -194,28 +193,19 @@ public class GameService {
         return "PASS".equals(ar.kind()) ? Action.pass() : Action.play(ar.cardIds(), ar.interpretationKey());
     }
 
-    private static String fingerprint(CommandRequest c) {
+    /**
+     * 请求体指纹（不含 request_id）：按位置逐元素 equals 的结构化列表，区分 null 与字符串 "null"、
+     * card_ids 逐张比较，避免字符串拼接的分隔符歧义导致同 id 异体误命中缓存。
+     */
+    private static List<Object> fingerprint(CommandRequest c) {
         ActionRequest a = c.action();
-        return c.expectedVersion() + "|" + a.kind() + "|" + (a.cardIds() == null ? "" : a.cardIds())
-                + "|" + a.interpretationKey();
+        return Arrays.asList(c.expectedVersion(), a.kind(), a.cardIds(), a.interpretationKey());
     }
 
     private static void requireVersion(GameState state, long expectedVersion) {
         if (expectedVersion != state.version()) {
             throw new GameRuleException("VERSION_CONFLICT", "expected_version 与当前版本不符",
                     Map.of("expected_version", expectedVersion, "current_version", state.version()));
-        }
-    }
-
-    private static void validateCardIds(List<Integer> cardIds) {
-        if (cardIds == null || cardIds.size() < MIN_CARDS || cardIds.size() > MAX_CARDS) {
-            throw new GameRuleException("SCHEMA_INVALID",
-                    "card_ids 需 " + MIN_CARDS + "-" + MAX_CARDS + " 张");
-        }
-        for (Integer id : cardIds) {
-            if (id == null) {
-                throw new GameRuleException("SCHEMA_INVALID", "card_ids 含 null");
-            }
         }
     }
 

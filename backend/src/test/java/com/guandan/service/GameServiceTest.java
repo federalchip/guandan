@@ -7,6 +7,7 @@ import com.guandan.api.dto.CreatedGame;
 import com.guandan.api.dto.GameView;
 import com.guandan.api.dto.LegalActionsResponse;
 import com.guandan.api.dto.MoveView;
+import com.guandan.api.dto.ResolveRequest;
 import com.guandan.api.dto.ResolveResponse;
 import com.guandan.bots.RandomLegalPolicy;
 import com.guandan.domain.CardIds;
@@ -97,7 +98,7 @@ class GameServiceTest {
         assertFalse(la.canPass());
         MoveView single = firstSingle(la);
 
-        ResolveResponse rr = svc.resolve(id, token, v0, single.cardIds());
+        ResolveResponse rr = svc.resolve(id, token, new ResolveRequest(v0, single.cardIds()));
         assertEquals(v0, rr.version());
         assertFalse(rr.choices().isEmpty(), "解析返回声明");
 
@@ -162,7 +163,7 @@ class GameServiceTest {
                 0, null, List.of(), Phase.PLAYING, null, 1L);
         store.create("g-copy", "t-copy", SEED, st);
 
-        ResolveResponse rr = svc.resolve("g-copy", "t-copy", 1L, List.of(copy));
+        ResolveResponse rr = svc.resolve("g-copy", "t-copy", new ResolveRequest(1L, List.of(copy)));
         assertEquals(1, rr.choices().size(), "非规范副本仍可解析为单张");
 
         MoveView pick = rr.choices().get(0);
@@ -213,6 +214,25 @@ class GameServiceTest {
                 () -> svc.submit(id, token, new CommandRequest(reqId, v0,
                         new ActionRequest("PLAY", b.cardIds(), b.interpretationKey()))));
         assertEquals("REQUEST_ID_REUSED", ex.code(), "同 id 异体先于版本检查被拒");
+    }
+
+    @Test
+    void test_same_request_id_omitted_key_vs_string_null_is_rejected() {
+        InMemoryGameStore store = new InMemoryGameStore();
+        GameService svc = service(store);
+        CreatedGame g = svc.createGame();
+        String id = g.gameId();
+        String token = g.sessionToken();
+        long v0 = g.state().version();
+        List<Integer> cards = firstSingle(svc.legalActions(id, token)).cardIds();
+        String reqId = UUID.randomUUID().toString();
+
+        // 唯一声明可省略 interpretation_key；第一次成功并留下收据
+        svc.submit(id, token, new CommandRequest(reqId, v0, new ActionRequest("PLAY", cards, null)));
+        // 同 request_id、把 interpretation_key 显式传成字符串 "null"：请求体不同，必须 409
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> svc.submit(id, token, new CommandRequest(reqId, v0, new ActionRequest("PLAY", cards, "null"))));
+        assertEquals("REQUEST_ID_REUSED", ex.code(), "省略键(null)与字符串\"null\"是不同请求体");
     }
 
     @Test
@@ -377,8 +397,50 @@ class GameServiceTest {
         CreatedGame g = svc.createGame();
         MoveView single = firstSingle(svc.legalActions(g.gameId(), g.sessionToken()));
         GameRuleException ex = assertThrows(GameRuleException.class,
-                () -> svc.resolve(g.gameId(), g.sessionToken(), g.state().version() + 5, single.cardIds()));
+                () -> svc.resolve(g.gameId(), g.sessionToken(),
+                        new ResolveRequest(g.state().version() + 5, single.cardIds())));
         assertEquals("VERSION_CONFLICT", ex.code());
+    }
+
+    // ---- 必填版本字段与错误优先级 ----
+
+    @Test
+    void test_command_missing_expected_version_is_schema_invalid() {
+        InMemoryGameStore store = new InMemoryGameStore();
+        GameService svc = service(store);
+        CreatedGame g = svc.createGame();
+        // expected_version 缺失(null)：必填，应 SCHEMA_INVALID，不得当作 0 执行推进
+        CommandRequest cmd = new CommandRequest(UUID.randomUUID().toString(), null,
+                new ActionRequest("PASS", null, null));
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> svc.submit(g.gameId(), g.sessionToken(), cmd));
+        assertEquals("SCHEMA_INVALID", ex.code());
+        assertEquals(g.state().version(), store.get(g.gameId()).state.version(), "未推进牌局");
+    }
+
+    @Test
+    void test_resolve_missing_expected_version_is_schema_invalid() {
+        InMemoryGameStore store = new InMemoryGameStore();
+        GameService svc = service(store);
+        CreatedGame g = svc.createGame();
+        GameRuleException ex = assertThrows(GameRuleException.class,
+                () -> svc.resolve(g.gameId(), g.sessionToken(), new ResolveRequest(null, List.of(4))));
+        assertEquals("SCHEMA_INVALID", ex.code());
+    }
+
+    @Test
+    void test_missing_token_precedes_schema_validation() {
+        InMemoryGameStore store = new InMemoryGameStore();
+        GameService svc = service(store);
+        CreatedGame g = svc.createGame();
+        // 无令牌 + 非法请求体(非 UUID request_id)：鉴权先于请求体校验 → SESSION_INVALID，而非 SCHEMA_INVALID
+        CommandRequest bad = new CommandRequest("not-a-uuid", 0L, new ActionRequest("PASS", null, null));
+        assertEquals("SESSION_INVALID",
+                assertThrows(GameRuleException.class, () -> svc.submit(g.gameId(), null, bad)).code());
+        // resolve 同理：无令牌 + 空 card_ids，先 401
+        assertEquals("SESSION_INVALID",
+                assertThrows(GameRuleException.class,
+                        () -> svc.resolve(g.gameId(), null, new ResolveRequest(0L, List.of()))).code());
     }
 
     // ---- 辅助 ----

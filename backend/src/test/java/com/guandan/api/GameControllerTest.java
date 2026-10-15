@@ -237,6 +237,108 @@ class GameControllerTest {
                 om.readTree(r2).get("state").get("version").asLong(), "重复请求不再推进");
     }
 
+    @Test
+    void test_same_request_id_omitted_key_vs_string_null_is_409() throws Exception {
+        GameRef g = createGame();
+        String la = mvc.perform(get(BASE + "/" + g.id() + "/legal-actions").header("Authorization", auth(g.token())))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode single = firstSingle(om.readTree(la).get("moves"));
+        List<Integer> cards = new ArrayList<>();
+        single.get("card_ids").forEach(c -> cards.add(c.asInt()));
+        String reqId = UUID.randomUUID().toString();
+
+        Map<String, Object> omitKey = new LinkedHashMap<>();
+        omitKey.put("kind", "PLAY");
+        omitKey.put("card_ids", cards);
+        Map<String, Object> cmd1 = new LinkedHashMap<>();
+        cmd1.put("request_id", reqId);
+        cmd1.put("expected_version", g.version());
+        cmd1.put("action", omitKey);
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(cmd1)))
+                .andExpect(status().isOk());
+
+        Map<String, Object> stringNullKey = new LinkedHashMap<>();
+        stringNullKey.put("kind", "PLAY");
+        stringNullKey.put("card_ids", cards);
+        stringNullKey.put("interpretation_key", "null");
+        Map<String, Object> cmd2 = new LinkedHashMap<>();
+        cmd2.put("request_id", reqId);
+        cmd2.put("expected_version", g.version());
+        cmd2.put("action", stringNullKey);
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(cmd2)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("REQUEST_ID_REUSED"));
+    }
+
+    @Test
+    void test_action_missing_expected_version_is_422() throws Exception {
+        GameRef g = createGame();
+        String la = mvc.perform(get(BASE + "/" + g.id() + "/legal-actions").header("Authorization", auth(g.token())))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode single = firstSingle(om.readTree(la).get("moves"));
+        List<Integer> cards = new ArrayList<>();
+        single.get("card_ids").forEach(c -> cards.add(c.asInt()));
+
+        Map<String, Object> action = new LinkedHashMap<>();
+        action.put("kind", "PLAY");
+        action.put("card_ids", cards);
+        Map<String, Object> cmd = new LinkedHashMap<>();
+        cmd.put("request_id", UUID.randomUUID().toString());
+        cmd.put("action", action);   // 省略 expected_version
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(cmd)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SCHEMA_INVALID"));
+
+        String explicitNull = "{\"request_id\":\"" + UUID.randomUUID() + "\",\"expected_version\":null,"
+                + "\"action\":{\"kind\":\"PLAY\",\"card_ids\":[" + cards.get(0) + "]}}";
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(explicitNull))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SCHEMA_INVALID"));
+    }
+
+    @Test
+    void test_resolve_missing_expected_version_is_422() throws Exception {
+        GameRef g = createGame();
+        String la = mvc.perform(get(BASE + "/" + g.id() + "/legal-actions").header("Authorization", auth(g.token())))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        JsonNode single = firstSingle(om.readTree(la).get("moves"));
+        List<Integer> cards = new ArrayList<>();
+        single.get("card_ids").forEach(c -> cards.add(c.asInt()));
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("card_ids", cards);   // 省略 expected_version
+        mvc.perform(post(BASE + "/" + g.id() + "/resolve").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(body)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SCHEMA_INVALID"));
+    }
+
+    @Test
+    void test_action_missing_token_precedes_schema_error_is_401() throws Exception {
+        GameRef g = createGame();
+        // 无令牌 + 非法 request_id：鉴权(401)必须先于请求体校验(422)
+        String body = "{\"request_id\":\"not-a-uuid\",\"expected_version\":0,\"action\":{\"kind\":\"PASS\"}}";
+        mvc.perform(post(BASE + "/" + g.id() + "/actions")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
+    }
+
+    @Test
+    void test_resolve_missing_token_precedes_schema_error_is_401() throws Exception {
+        GameRef g = createGame();
+        // 无令牌 + 空 card_ids：鉴权(401)必须先于请求体校验(422)
+        String body = "{\"expected_version\":0,\"card_ids\":[]}";
+        mvc.perform(post(BASE + "/" + g.id() + "/resolve")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
+    }
+
     // ---- 辅助 ----
 
     private void assert422(GameRef g, String body) throws Exception {

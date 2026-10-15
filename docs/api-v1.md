@@ -10,7 +10,7 @@
 
 - JSON 字段统一 snake_case；enum 转字符串，List 转数组。
 - 反序列化 **拒绝未知字段**、**不做标量强制转换**（`"4"`、`4.0`、`true` 不得当成整数），缺失/多余字段判为结构错误。
-- `card_id` 与 `expected_version` 为严格整数；`request_id` 为 UUID 字符串。
+- `card_id` 与 `expected_version` 为严格整数；`expected_version` **必填**，缺失或为 `null` 判为 `422 SCHEMA_INVALID`（不当作 `0` 执行）；`request_id` 为 UUID 字符串。
 - 动作是带 `kind` 的判别联合：`PLAY` 携带 `card_ids`（1–10 张）与可选 `interpretation_key`；`PASS` **不得**携带 `card_ids` 或 `interpretation_key`。
 - 响应只含公开信息，**不泄露** `seed`、traceback 或其他座位手牌；对手仅以 `remaining_counts` 张数呈现。
 - 进程重启后所有局清空，旧 `game_id` 一律按 `404 GAME_NOT_FOUND` 恢复。
@@ -148,7 +148,7 @@
 | 500 | `BOT_STEP_LIMIT` | 机器人步数超上限，批次回滚 |
 | 500 | `INTERNAL_ERROR` | 未预期异常，批次回滚 |
 
-错误优先级：缺少令牌先 `401`；携带令牌但游戏不存在先 `404`；游戏存在时再区分无效令牌 `401` 与其他局的有效令牌 `403`。
+错误优先级：缺少令牌先 `401`；携带令牌但游戏不存在先 `404`；游戏存在时再区分无效令牌 `401` 与其他局的有效令牌 `403`。鉴权先于请求体 schema 校验：无令牌且请求体不合法时返回 `401`，而非 `422`。
 
 `AMBIGUOUS_DECLARATION` 示例：
 ```json
