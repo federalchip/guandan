@@ -1,6 +1,6 @@
 # 掼蛋 v1 后端工程
 
-此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–F：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较、独立参照 `SmallHandOracle`、生产生成器 `LegalMoveGenerator` 与 T4c 基准、纯牌局状态机 `GameEngine` + `PlayerViewFactory`、随机合法机器人 `RandomLegalPolicy` + M2 耗时基线、内存服务 `GameService`/`InMemoryGameStore` 与 `/api/v1/games` HTTP 接口（会话/幂等/每局锁/错误映射，见 [api-v1](../docs/api-v1.md)）；另有应用启动和 `GET /api/v1/health`。前端页面与 CLI 尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
+此目录使用 JDK 17、Spring Boot 3.5.16 和 Maven 3.9.11。当前已交付 A–F：规则合同与人工 fixture、108 张牌及领域模型、牌型解析与比较、独立参照 `SmallHandOracle`、生产生成器 `LegalMoveGenerator` 与 T4c 基准、纯牌局状态机 `GameEngine` + `PlayerViewFactory`、随机合法机器人 `RandomLegalPolicy` + M2 耗时基线、内存服务 `GameService`/`InMemoryGameStore` 与 `/api/v1/games` HTTP 接口（会话/幂等/每局锁/错误映射，见 [api-v1](../docs/api-v1.md)）；另有应用启动和 `GET /api/v1/health`。前端已有 T8 牌桌与选牌界面（恢复竞态已修、手牌按级牌序展示）；T9 出牌交互和 CLI 尚未实现。完整行为合同见 [v1 MVP 计划](../2026-10-06-guandan-v1-mvp.md)，后续开发交接见 [Qoder 任务单](../docs/qoder-handoff-v1.md)。
 
 ## 环境
 
