@@ -2,6 +2,8 @@ package com.guandan.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.guandan.api.dto.ActionRequest;
+import com.guandan.domain.model.GameRuleException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -18,6 +20,9 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -204,6 +209,45 @@ class GameControllerTest {
         assert422(g, "{\"request_id\":\"abc\",\"expected_version\":0,\"action\":{\"kind\":\"PASS\"}}");
         // PLAY 超过 10 张
         assert422(g, "{\"request_id\":\"" + u + "\",\"expected_version\":0,\"action\":{\"kind\":\"PLAY\",\"card_ids\":[1,2,3,4,5,6,7,8,9,10,11]}}");
+    }
+
+    @Test
+    void test_pass_with_explicit_null_fields_is_422() throws Exception {
+        GameRef g = createGame();
+        // 显式 card_ids:null（领出旧行为 400 PASS_NOT_ALLOWED，跟牌旧行为 200 推进）→ 合同要求 422
+        assert422(g, "{\"request_id\":\"" + UUID.randomUUID() + "\",\"expected_version\":0,"
+                + "\"action\":{\"kind\":\"PASS\",\"card_ids\":null}}");
+        // 显式 interpretation_key:null 同理
+        assert422(g, "{\"request_id\":\"" + UUID.randomUUID() + "\",\"expected_version\":0,"
+                + "\"action\":{\"kind\":\"PASS\",\"interpretation_key\":null}}");
+        // 控制组：缺失字段（规范 PASS 形）不被 nulls=FAIL 拦截，仍走到引擎 → 领出 400
+        String absent = "{\"request_id\":\"" + UUID.randomUUID() + "\",\"expected_version\":0,"
+                + "\"action\":{\"kind\":\"PASS\"}}";
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content(absent))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASS_NOT_ALLOWED"));
+    }
+
+    @Test
+    void test_explicit_null_distinguished_from_absent() throws Exception {
+        // 显式 null：反序列化成功但标记 present，由 validate() 拒绝（服务层在鉴权后调用）
+        ActionRequest explicitNull = om.readValue("{\"kind\":\"PASS\",\"card_ids\":null}", ActionRequest.class);
+        assertTrue(explicitNull.cardIdsPresent(), "显式 card_ids:null 标记为存在");
+        assertNull(explicitNull.cardIds());
+        assertEquals("SCHEMA_INVALID",
+                assertThrows(GameRuleException.class, explicitNull::validate).code());
+
+        // 缺失：present=false，validate() 通过（规范 PASS 形）
+        ActionRequest absent = om.readValue("{\"kind\":\"PASS\"}", ActionRequest.class);
+        assertFalse(absent.cardIdsPresent(), "缺失 card_ids 标记为不存在");
+        assertNull(absent.cardIds());
+        absent.validate();
+
+        // interpretation_key 同理
+        ActionRequest keyNull = om.readValue("{\"kind\":\"PASS\",\"interpretation_key\":null}", ActionRequest.class);
+        assertTrue(keyNull.interpretationKeyPresent());
+        assertThrows(GameRuleException.class, keyNull::validate);
     }
 
     @Test
