@@ -1,0 +1,518 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "掼蛋 v1 API",
+    "description" : "单局 · 两副牌 108 张 · 固定打 2；语义权威见 docs/api-v1.md",
+    "version" : "v1"
+  },
+  "servers" : [ {
+    "url" : "http://localhost",
+    "description" : "Generated server url"
+  } ],
+  "paths" : {
+    "/api/v1/games" : {
+      "post" : {
+        "tags" : [ "game-controller" ],
+        "operationId" : "createGame",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateGameRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreatedGame"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/resolve" : {
+      "post" : {
+        "tags" : [ "game-controller" ],
+        "operationId" : "resolve",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Authorization",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ResolveRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ResolveResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/actions" : {
+      "post" : {
+        "tags" : [ "game-controller" ],
+        "operationId" : "submit",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Authorization",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CommandRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CommandResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health" : {
+      "get" : {
+        "tags" : [ "health-controller" ],
+        "operationId" : "health",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}" : {
+      "get" : {
+        "tags" : [ "game-controller" ],
+        "operationId" : "getGame",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Authorization",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GameView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/legal-actions" : {
+      "get" : {
+        "tags" : [ "game-controller" ],
+        "operationId" : "legalActions",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Authorization",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LegalActionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CreateGameRequest" : { },
+      "CardView" : {
+        "properties" : {
+          "card_id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "deck_index" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "suit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CreatedGame" : {
+        "properties" : {
+          "game_id" : {
+            "type" : "string"
+          },
+          "session_token" : {
+            "type" : "string"
+          },
+          "state" : {
+            "$ref" : "#/components/schemas/GameView"
+          }
+        }
+      },
+      "GameView" : {
+        "properties" : {
+          "game_id" : {
+            "type" : "string"
+          },
+          "own_hand" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CardView"
+            }
+          },
+          "remaining_counts" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "trick" : {
+            "$ref" : "#/components/schemas/PublicTrickView"
+          },
+          "finish_order" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "current_player" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "is_lead" : {
+            "type" : "boolean"
+          },
+          "can_pass" : {
+            "type" : "boolean"
+          },
+          "profile_id" : {
+            "type" : "string"
+          },
+          "level_rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "phase" : {
+            "type" : "string"
+          },
+          "result" : {
+            "$ref" : "#/components/schemas/ResultView"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "MoveView" : {
+        "properties" : {
+          "card_ids" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "main_rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "length" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "wild_bindings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/WildBindingView"
+            }
+          },
+          "interpretation_key" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PublicTrickView" : {
+        "properties" : {
+          "owner_id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "move" : {
+            "$ref" : "#/components/schemas/MoveView"
+          },
+          "cards" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/CardView"
+            }
+          }
+        }
+      },
+      "ResultView" : {
+        "properties" : {
+          "winner_team" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "placement_groups" : {
+            "type" : "array",
+            "items" : {
+              "type" : "array",
+              "items" : {
+                "type" : "integer",
+                "format" : "int32"
+              }
+            }
+          },
+          "outcome" : {
+            "type" : "string"
+          }
+        }
+      },
+      "WildBindingView" : {
+        "properties" : {
+          "card_id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "rank" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "suit" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ResolveRequest" : {
+        "properties" : {
+          "expected_version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "card_ids" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          }
+        }
+      },
+      "ResolveResponse" : {
+        "properties" : {
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "choices" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MoveView"
+            }
+          }
+        }
+      },
+      "ActionRequest" : {
+        "properties" : {
+          "kind" : {
+            "type" : "string"
+          },
+          "card_ids" : {
+            "type" : "array",
+            "items" : {
+              "type" : "integer",
+              "format" : "int32"
+            }
+          },
+          "interpretation_key" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CommandRequest" : {
+        "properties" : {
+          "request_id" : {
+            "type" : "string"
+          },
+          "expected_version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "action" : {
+            "$ref" : "#/components/schemas/ActionRequest"
+          }
+        }
+      },
+      "CommandResponse" : {
+        "properties" : {
+          "request_id" : {
+            "type" : "string"
+          },
+          "accepted_version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "state" : {
+            "$ref" : "#/components/schemas/GameView"
+          },
+          "events" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EventView"
+            }
+          }
+        }
+      },
+      "EventView" : {
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "state_version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "event_type" : {
+            "type" : "string"
+          },
+          "actor_id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "payload" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "object"
+            }
+          }
+        }
+      },
+      "HealthResponse" : {
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          }
+        }
+      },
+      "LegalActionsResponse" : {
+        "properties" : {
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "moves" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MoveView"
+            }
+          },
+          "can_pass" : {
+            "type" : "boolean"
+          }
+        }
+      }
+    }
+  }
+}
