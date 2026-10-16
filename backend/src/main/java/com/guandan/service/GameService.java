@@ -211,6 +211,14 @@ public class GameService {
         }
     }
 
+    /**
+     * 仅校验会话（不取锁、不返回记录），供前置鉴权拦截器在请求体解析前调用；失败抛
+     * {@link GameRuleException}（SESSION_INVALID/GAME_NOT_FOUND/SESSION_FORBIDDEN）。
+     */
+    public void requireSession(String gameId, String sessionToken) {
+        authorize(gameId, sessionToken);
+    }
+
     private GameRecord authorize(String gameId, String sessionToken) {
         if (sessionToken == null || sessionToken.isBlank()) {
             throw new GameRuleException("SESSION_INVALID", "缺少会话令牌");

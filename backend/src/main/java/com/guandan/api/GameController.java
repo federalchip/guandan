@@ -21,13 +21,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 同步 HTTP 路由，统一 /api/v1 前缀；除创建外使用 {@code Authorization: Bearer <session_token>}。
- * 路由不接收客户端 player_id（真人固定座位 0）。控制器只做请求/响应与边界校验，业务在 {@link GameService}。
+ * 路由不接收客户端 player_id（真人固定座位 0）。控制器只做请求/响应，业务在 {@link GameService}。
+ * 会话鉴权由 {@link SessionAuthInterceptor} 在请求体解析前前置完成，服务层再次校验（防御性、且供单元测试）。
  */
 @RestController
 @RequestMapping("/api/v1")
 public class GameController {
-
-    private static final String BEARER_PREFIX = "Bearer ";
 
     private final GameService service;
 
@@ -44,34 +43,26 @@ public class GameController {
     @GetMapping("/games/{id}")
     public GameView getGame(@PathVariable("id") String id,
                             @RequestHeader(value = "Authorization", required = false) String auth) {
-        return service.getGame(id, bearer(auth));
+        return service.getGame(id, BearerTokens.token(auth));
     }
 
     @GetMapping("/games/{id}/legal-actions")
     public LegalActionsResponse legalActions(@PathVariable("id") String id,
                                              @RequestHeader(value = "Authorization", required = false) String auth) {
-        return service.legalActions(id, bearer(auth));
+        return service.legalActions(id, BearerTokens.token(auth));
     }
 
     @PostMapping("/games/{id}/resolve")
     public ResolveResponse resolve(@PathVariable("id") String id,
                                    @RequestHeader(value = "Authorization", required = false) String auth,
                                    @RequestBody ResolveRequest body) {
-        return service.resolve(id, bearer(auth), body);
+        return service.resolve(id, BearerTokens.token(auth), body);
     }
 
     @PostMapping("/games/{id}/actions")
     public CommandResponse submit(@PathVariable("id") String id,
                                   @RequestHeader(value = "Authorization", required = false) String auth,
                                   @RequestBody CommandRequest body) {
-        return service.submit(id, bearer(auth), body);
-    }
-
-    private static String bearer(String auth) {
-        if (auth != null && auth.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
-            String token = auth.substring(BEARER_PREFIX.length()).trim();
-            return token.isEmpty() ? null : token;
-        }
-        return null;
+        return service.submit(id, BearerTokens.token(auth), body);
     }
 }

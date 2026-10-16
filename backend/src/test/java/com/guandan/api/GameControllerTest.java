@@ -383,6 +383,47 @@ class GameControllerTest {
                 .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
     }
 
+    @Test
+    void test_malformed_json_no_token_is_401() throws Exception {
+        GameRef g = createGame();
+        // 无令牌 + JSON 语法错误：@RequestBody 解析前应先鉴权 → 401（旧行为 422）
+        mvc.perform(post(BASE + "/" + g.id() + "/actions")
+                        .contentType(MediaType.APPLICATION_JSON).content("{ this is not json"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
+    }
+
+    @Test
+    void test_wrong_type_body_no_token_is_401() throws Exception {
+        GameRef g = createGame();
+        // 无令牌 + 字段类型非法（expected_version 为字符串，禁标量强制）：解析期错误也应先 401
+        String body = "{\"request_id\":\"" + UUID.randomUUID() + "\",\"expected_version\":\"0\","
+                + "\"action\":{\"kind\":\"PASS\"}}";
+        mvc.perform(post(BASE + "/" + g.id() + "/actions")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
+    }
+
+    @Test
+    void test_resolve_malformed_json_no_token_is_401() throws Exception {
+        GameRef g = createGame();
+        mvc.perform(post(BASE + "/" + g.id() + "/resolve")
+                        .contentType(MediaType.APPLICATION_JSON).content("{bad"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_INVALID"));
+    }
+
+    @Test
+    void test_malformed_json_with_valid_token_is_422() throws Exception {
+        GameRef g = createGame();
+        // 控制组：令牌有效时拦截器放行，解析错误仍 422（不被 401 掩盖）
+        mvc.perform(post(BASE + "/" + g.id() + "/actions").header("Authorization", auth(g.token()))
+                        .contentType(MediaType.APPLICATION_JSON).content("{bad"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SCHEMA_INVALID"));
+    }
+
     // ---- 辅助 ----
 
     private void assert422(GameRef g, String body) throws Exception {
