@@ -425,7 +425,7 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 
 **Files:** `backend/src/main/java/com/guandan/service/{InMemoryGameStore,GameService}.java`、`backend/src/main/java/com/guandan/api/{GameController,ApiExceptionHandler}.java`、`backend/src/main/java/com/guandan/api/dto/*.java`、`backend/src/main/java/com/guandan/GuandanApplication.java`、`backend/src/test/java/com/guandan/service/GameServiceTest.java`、`backend/src/test/java/com/guandan/api/GameControllerTest.java`、`docs/api-v1.md`。
 
-**Interfaces:** 消费 T5–T6；实现本文 GameService 与 HTTP 合同；所有传输 DTO 在 `api/dto/` 定义，OpenAPI 是前端字段依据。
+**Interfaces:** 消费 T5–T6；实现本文 GameService 与 HTTP 合同；所有传输 DTO 在 `api/dto/` 定义，OPENAPI或api-v1.md与实际DTO是前端字段依据。
 
 - [ ] 用注入的固定 seed、内存存储和 policy 写创建、解析、出牌、过牌、刷新快照、结束后拒绝动作的测试。
 - [ ] 写 `test_resolve_accepts_noncanonical_identical_copy`：生成器选 S3@0，但真人选择手里的 S3@1 仍可解析并扣除正确实体。
@@ -442,7 +442,7 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 
 **Files:** `frontend/package.json`、`frontend/package-lock.json`、`frontend/vite.config.ts`、`frontend/src/{App.vue,main.ts}`、`frontend/src/api/game.ts`、`frontend/src/state/game.ts`、`frontend/src/components/{Card,Hand,Table,ActionBar,ResultPanel}.vue`、`frontend/src/__tests__/selection.test.ts`。
 
-**Interfaces:** 消费 T7 OpenAPI；输出 `createGame()`、`getGame(gameId, token)`、可见 GameView 类型；状态模块提供 `toggleSelected(cardId)`、`applySnapshot(gameId, view)`、`resetSelection()`。
+**Interfaces:** 消费 T7 的 OPENAPI或api-v1.md与实际DTO；输出 `createGame()`、`getGame(gameId, token)`、可见 GameView 类型；状态模块提供 `toggleSelected(cardId)`、`applySnapshot(gameId, view)`、`resetSelection()`。
 
 - [ ] 建立 Vue TS 基础配置、Vitest 运行器和 npm 脚本；此时组件和状态模块只有测试所需入口，不实现业务。提交解析后的 package-lock.json。
 - [ ] 写 `test_duplicate_faces_select_independently`：两张黑桃 A 的不同 ID 分别选择，不以 rank/suit 作 key。
