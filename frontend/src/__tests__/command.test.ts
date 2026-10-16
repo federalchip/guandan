@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { createGameState, type GameStore, type PendingCommand } from '../state/game'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { createGameState, generateRequestId, type GameStore, type PendingCommand } from '../state/game'
 import type { GameApi } from '../api/game'
 import { ApiError } from '../api/game'
 import type { components } from '../api/schema'
@@ -581,5 +581,125 @@ describe('T9 提示/过牌/断网/非法动作', () => {
     expect(store.state.pending).not.toBeNull() // 保留 pending 供重试
     expect(store.state.busy).toBe(true) // 锁住新出牌/过牌
     expect(store.state.notice).toContain('网络异常')
+  })
+})
+
+describe('T9 评审修复：重试锁/重复提交/404/UUID', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+  it('test_request_id_fallback_is_valid_uuid', () => {
+    const orig = globalThis.crypto
+    try {
+      // 降级一：有 getRandomValues 但无 randomUUID
+      vi.stubGlobal('crypto', { getRandomValues: orig.getRandomValues.bind(orig) })
+      expect(generateRequestId()).toMatch(UUID_RE)
+      // 降级二：crypto 无 getRandomValues → Math.random 回退，仍须是合法 UUID
+      vi.stubGlobal('crypto', {})
+      expect(generateRequestId()).toMatch(UUID_RE)
+      // 默认路径（有 randomUUID）
+      vi.unstubAllGlobals()
+      expect(generateRequestId()).toMatch(UUID_RE)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('test_multi_declaration_double_pick_submits_once', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => ({
+      version: 0,
+      choices: [
+        { kind: 'STRAIGHT', card_ids: [1, 2, 3, 4, 5], interpretation_key: 'K1' },
+        { kind: 'STRAIGHT_FLUSH', card_ids: [1, 2, 3, 4, 5], interpretation_key: 'K2' },
+      ],
+    })
+    const store = activeStore(fake.api, storage)
+    ;[1, 2, 3, 4, 5].forEach((id) => store.toggleSelected(id))
+    await store.playSelection()
+    expect(store.state.choices?.length).toBe(2)
+    // 连续触发选定：第二次必须被忽略，不得为同一选牌生成第二个 request_id
+    const p1 = store.pickDeclaration('K1')
+    const p2 = store.pickDeclaration('K2')
+    await Promise.all([p1, p2])
+    await flush()
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].action?.interpretation_key).toBe('K1')
+  })
+
+  it('test_resolve_404_invalidates_session', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    fake.resp.resolve = () => Promise.reject(new ApiError(404, 'GAME_NOT_FOUND', 'missing'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(store.state.notice).toBe('本局已失效，请重新开始') // 非普通错误文本
+    expect(store.state.gameId).toBeNull() // 旧局已清除
+    expect(storage.raw.has(SESSION_KEY)).toBe(false) // 会话已清理
+    expect(store.state.busy).toBe(false)
+  })
+
+  it('test_hint_404_invalidates_session', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    fake.resp.legal = () => Promise.reject(new ApiError(404, 'GAME_NOT_FOUND', 'missing'))
+    const store = activeStore(fake.api, storage)
+    await store.cycleHint()
+    expect(store.state.notice).toBe('本局已失效，请重新开始')
+    expect(store.state.gameId).toBeNull()
+    expect(storage.raw.has(SESSION_KEY)).toBe(false)
+  })
+
+  it('test_awaiting_retry_flag_only_after_unknown_outcome', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    const d = deferred<CommandResponse>()
+    fake.resp.submit = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p = store.playSelection()
+    await flush()
+    expect(store.state.pending).not.toBeNull()
+    expect(store.state.awaitingRetry).toBe(false) // 正常在途请求不暴露重试
+    d.reject(new Error('network'))
+    await flush()
+    await p
+    expect(store.state.awaitingRetry).toBe(true) // 结果不明后才提示重试
+  })
+
+  it('test_stale_error_after_concurrent_success_does_not_relock', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    const d1 = deferred<CommandResponse>()
+    const d2 = deferred<CommandResponse>()
+    let n = 0
+    fake.resp.submit = () => (n++ === 0 ? d1.promise : d2.promise)
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p1 = store.playSelection() // 提交#1（rA）在途
+    await flush()
+    const p2 = store.retryPendingCommand() // 提交#2（同 rA）在途，两条并存
+    await flush()
+    expect(fake.calls.submit.length).toBe(2)
+    // 重试先成功：确认并清除 pending、解锁
+    d2.resolve(ack(fake.calls.submit[1], 1))
+    await flush()
+    await p2
+    expect(store.state.pending).toBeNull()
+    expect(store.state.busy).toBe(false)
+    expect(store.state.awaitingRetry).toBe(false)
+    // 原请求随后网络错误：陈旧错误不得把 busy 重新置真、不得复活重试
+    d1.reject(new Error('network late'))
+    await flush()
+    await p1
+    expect(store.state.busy).toBe(false)
+    expect(store.state.awaitingRetry).toBe(false)
+    expect(store.state.pending).toBeNull()
+    expect(store.state.notice ?? '').not.toContain('网络异常')
   })
 })

@@ -52,6 +52,7 @@ export interface GameStore {
     hintIndex: number
     canPass: boolean
     animating: boolean
+    awaitingRetry: boolean // 结果不明（5xx/网络）且 pending 仍在，向用户暴露“重试”
     notice: string | null
   }
   toggleSelected(cardId: number): void
@@ -73,15 +74,33 @@ function defaultStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> |
   return typeof sessionStorage !== 'undefined' ? sessionStorage : undefined
 }
 
-function defaultRequestId(): string {
+/**
+ * 生成 UUID v4 字符串。后端 CommandRequest 以 UUID.fromString 校验 request_id，
+ * 故任何环境下都必须产出合法 UUID；无 crypto.randomUUID 时依次降级到
+ * crypto.getRandomValues、Math.random，但形态始终是 8-4-4-4-12 且版本/变体位正确。
+ */
+export function uuidV4(): string {
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80 // variant 10xx
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+export function generateRequestId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  return `rid-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  return uuidV4()
 }
 
 export function createGameState(options: GameStoreOptions = {}): GameStore {
   const storage = options.storage ?? defaultStorage()
   const api = options.api
-  const newRequestId = options.newRequestId ?? defaultRequestId
+  const newRequestId = options.newRequestId ?? generateRequestId
   const animate = options.animate ?? false
   const scheduleStep = options.scheduleStep ?? ((fn: () => void) => void setTimeout(fn, ANIMATION_STEP_MS))
   const onEvent = options.onEvent
@@ -99,6 +118,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     hintIndex: -1,
     canPass: false,
     animating: false,
+    awaitingRetry: false,
     notice: null as string | null,
   })
 
@@ -206,13 +226,28 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     const p = state.pending
     if (p && p.game_id === gameId && p.command.request_id === requestId) {
       state.pending = null
+      state.awaitingRetry = false
       if (storage) storage.removeItem(PENDING_KEY)
     }
   }
 
+  /** 当前 pending 是否仍对应这条命令（game_id + request_id）；用于区分陈旧错误与真正结果不明。 */
+  function pendingMatches(gameId: string, requestId: string | undefined): boolean {
+    const p = state.pending
+    return !!p && p.game_id === gameId && p.command.request_id === requestId
+  }
+
   function dropPending(): void {
     state.pending = null
+    state.awaitingRetry = false
     if (storage) storage.removeItem(PENDING_KEY)
+  }
+
+  /** 服务重启/本局失效（404）：清理会话与 pending，退回“请重新开始”。 */
+  function invalidateSession(): void {
+    if (storage) storage.removeItem(SESSION_KEY)
+    clearGame() // 内部 dropPending → awaitingRetry=false、busy=false
+    state.notice = '本局已失效，请重新开始'
   }
 
   /** 清除所有跨局上下文：pending、声明弹窗、提示候选、动画与事件去重状态。 */
@@ -311,6 +346,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   async function submit(command: CommandRequest, gameId: string, token: string, gen: number): Promise<void> {
     persistPending({ game_id: gameId, command })
     state.busy = true
+    state.awaitingRetry = false // 新一次尝试在途，撤回“重试”提示，待结果不明再置位
     try {
       const client = requireApi()
       const response: CommandResponse = await client.submitCommand(gameId, token, command)
@@ -414,16 +450,15 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   function handleCommandError(gameId: string, command: CommandRequest, e: unknown): void {
     if (e instanceof ApiError) {
       if (e.status === 404) {
-        if (storage) storage.removeItem(SESSION_KEY)
-        dropPending()
-        clearGame()
-        state.busy = false
-        state.notice = '本局已失效，请重新开始'
+        invalidateSession()
         return
       }
       if (e.status >= 500) {
-        // 结果不明（服务端错误，批次可能已回滚）：保留 pending、锁定、允许重试/恢复
+        // 结果不明（服务端错误，批次可能已回滚）：保留 pending、锁定、允许重试/恢复。
+        // 若这条命令的 pending 已被并发成功清除，则这是陈旧的迟到错误，整体忽略，不得重新上锁。
+        if (!pendingMatches(gameId, command.request_id)) return
         state.busy = true
+        state.awaitingRetry = true
         state.notice = '结果不明，请重试或刷新恢复'
         return
       }
@@ -434,8 +469,10 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       if (e.code === 'VERSION_CONFLICT' || e.code === 'NOT_YOUR_TURN') void resync()
       return
     }
-    // 网络错误/超时 → 结果不明：保留 pending、锁定、允许重试
+    // 网络错误/超时 → 结果不明：保留 pending、锁定、允许重试（同样忽略已被并发确认的陈旧错误）。
+    if (!pendingMatches(gameId, command.request_id)) return
     state.busy = true
+    state.awaitingRetry = true
     state.notice = '网络异常，结果不明，请重试'
   }
 
@@ -476,6 +513,10 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       resolveContext = { gameId, token, cardIds, expectedVersion, gen }
     } catch (e) {
       if (gen !== generation || gameId !== state.gameId) return
+      if (e instanceof ApiError && e.status === 404) {
+        invalidateSession() // 解析遇到本局失效：按服务重启规则清会话，而非普通错误
+        return
+      }
       state.busy = false
       state.notice = messageOf(e) // 解析失败（如 INVALID_MOVE）保留选牌
     }
@@ -499,6 +540,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   async function pickDeclaration(interpretationKey: string): Promise<void> {
     const ctx = resolveContext
     if (!ctx) return
+    resolveContext = null // 同步清空上下文：连续/重复选定只会提交一次，杜绝同选牌生成第二个 request_id
     state.choices = null
     await submitPlay(ctx.gameId, ctx.token, ctx.cardIds, interpretationKey, ctx.expectedVersion, ctx.gen)
   }
@@ -570,6 +612,10 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       state.busy = false
     } catch (e) {
       if (gen !== generation || gameId !== state.gameId) return
+      if (e instanceof ApiError && e.status === 404) {
+        invalidateSession() // 提示遇到本局失效：按服务重启规则清会话
+        return
+      }
       state.busy = false
       state.notice = messageOf(e)
     }

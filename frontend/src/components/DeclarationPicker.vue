@@ -1,23 +1,12 @@
 <script setup lang="ts">
 import type { components } from '../api/schema'
+import { KIND_LABEL } from '../state/eventLabel'
 
 type MoveView = components['schemas']['MoveView']
 
 defineProps<{ choices: MoveView[] }>()
 const emit = defineEmits<{ (e: 'pick', interpretationKey: string): void; (e: 'cancel'): void }>()
 
-const KIND_LABEL: Record<string, string> = {
-  SINGLE: '单张',
-  PAIR: '对子',
-  TRIPLE: '三张',
-  FULL_HOUSE: '三带二',
-  STRAIGHT: '顺子',
-  PAIR_RUN: '连对',
-  TRIPLE_RUN: '钢板',
-  BOMB: '炸弹',
-  STRAIGHT_FLUSH: '同花顺',
-  JOKER_BOMB: '天王炸',
-}
 const RANK_LABEL: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A', 15: '小王', 16: '大王' }
 
 function rankLabel(rank: number | undefined): string {
