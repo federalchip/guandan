@@ -141,4 +141,67 @@ describe('T8 旧局恢复竞态（迟到的旧局响应不得替换新局）', (
     expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull() // 清理旧会话
     expect(wrapper.find('.notice').text()).toContain('本局已失效')
   })
+
+  it('test_new_game_success_clears_stale_recovery_notice', async () => {
+    seedOldSession()
+    const get = deferred<Response>()
+    const post = deferred<Response>()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown, init?: { method?: string }) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'POST' && url.endsWith('/games')) return post.promise
+        return get.promise
+      }),
+    )
+
+    const wrapper = mount(App)
+    await flushPromises() // recover GET 在途
+
+    // 点击“开始一局”，POST 在途；此时 sessionGen 仍为 0（成功才自增）
+    await wrapper.findAll('button').find((b) => b.text() === '开始一局')!.trigger('click')
+
+    // 旧局 GET 先返回 404 → 写入“本局已失效”提示
+    get.resolve(errResp(404, 'GAME_NOT_FOUND', '游戏不存在'))
+    await flushPromises()
+    expect(wrapper.find('.notice').text()).toContain('本局已失效')
+
+    // 新局 POST 随后成功 → 必须清除旧提示，只留新局牌桌
+    post.resolve(jsonResp(CREATED))
+    await flushPromises()
+    expect(wrapper.find('[data-card-id="48"]').exists()).toBe(true)
+    expect(wrapper.find('.notice').exists()).toBe(false)
+    expect(storedGameId()).toBe('new')
+  })
+
+  it('test_rapid_double_click_sends_only_one_create', async () => {
+    const post = deferred<Response>()
+    let postCount = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: unknown, init?: { method?: string }) => {
+        const url = String(input)
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'POST' && url.endsWith('/games')) {
+          postCount++
+          return post.promise
+        }
+        return Promise.resolve(jsonResp(OLD_VIEW))
+      }),
+    )
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const findStart = () => wrapper.findAll('button').find((b) => b.text() === '开始一局')!
+    await findStart().trigger('click') // 第一次：POST 在途
+    await findStart().trigger('click') // 第二次：应被在途限制忽略
+    expect(postCount).toBe(1)
+
+    post.resolve(jsonResp(CREATED))
+    await flushPromises()
+    expect(wrapper.find('[data-card-id="48"]').exists()).toBe(true)
+    expect(storedGameId()).toBe('new')
+  })
 })

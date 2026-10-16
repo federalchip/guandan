@@ -17,6 +17,8 @@ const notice = ref<string | null>(null)
 // 会话代次：每次成功建立新局自增。恢复请求在 await 前记录代次，回调时若代次已变，
 // 说明用户已另开新局，这条迟到的旧局响应（成功或失败）必须整体忽略，不得回写状态/存储/提示。
 let sessionGen = 0
+// 创建请求在途标志：连续点击“开始一局”只发一次创建，避免较早请求晚归覆盖较晚结果。
+let creating = false
 
 const view = computed(() => store.state.view)
 const started = computed(() => view.value !== null)
@@ -36,6 +38,8 @@ function messageOf(e: unknown): string {
 }
 
 async function startGame() {
+  if (creating) return // 在途限制：忽略连续点击，杜绝较早创建晚归覆盖较晚结果
+  creating = true
   notice.value = null
   try {
     const created = await api.createGame()
@@ -46,8 +50,11 @@ async function startGame() {
     store.setSession(gameId, token)
     store.applySnapshot(gameId, state)
     persist()
+    notice.value = null // 新局权威建立，清除旧局恢复在途期间写入的提示（如“本局已失效”）
   } catch (e) {
     notice.value = messageOf(e)
+  } finally {
+    creating = false
   }
 }
 
