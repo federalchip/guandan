@@ -3,7 +3,6 @@ package com.guandan.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.guandan.api.dto.ActionRequest;
-import com.guandan.domain.model.GameRuleException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -230,24 +229,41 @@ class GameControllerTest {
     }
 
     @Test
-    void test_explicit_null_distinguished_from_absent() throws Exception {
-        // 显式 null：反序列化成功但标记 present，由 validate() 拒绝（服务层在鉴权后调用）
-        ActionRequest explicitNull = om.readValue("{\"kind\":\"PASS\",\"card_ids\":null}", ActionRequest.class);
-        assertTrue(explicitNull.cardIdsPresent(), "显式 card_ids:null 标记为存在");
-        assertNull(explicitNull.cardIds());
-        assertEquals("SCHEMA_INVALID",
-                assertThrows(GameRuleException.class, explicitNull::validate).code());
-
-        // 缺失：present=false，validate() 通过（规范 PASS 形）
+    void test_explicit_null_rejected_but_absent_allowed() throws Exception {
+        // 显式 null：解析期即拒（区别于字段缺失）
+        assertThrows(Exception.class,
+                () -> om.readValue("{\"kind\":\"PASS\",\"card_ids\":null}", ActionRequest.class));
+        assertThrows(Exception.class,
+                () -> om.readValue("{\"kind\":\"PASS\",\"interpretation_key\":null}", ActionRequest.class));
+        // 缺失：规范 PASS 形，绑定成功且 validate() 通过
         ActionRequest absent = om.readValue("{\"kind\":\"PASS\"}", ActionRequest.class);
-        assertFalse(absent.cardIdsPresent(), "缺失 card_ids 标记为不存在");
         assertNull(absent.cardIds());
+        assertNull(absent.interpretationKey());
         absent.validate();
+    }
 
-        // interpretation_key 同理
-        ActionRequest keyNull = om.readValue("{\"kind\":\"PASS\",\"interpretation_key\":null}", ActionRequest.class);
-        assertTrue(keyNull.interpretationKeyPresent());
-        assertThrows(GameRuleException.class, keyNull::validate);
+    @Test
+    void test_action_request_serialization_round_trip() throws Exception {
+        // PASS 序列化为合同形：只有 kind，无 null 的 card_ids/interpretation_key，更无 presence 元数据
+        ActionRequest pass = new ActionRequest("PASS", null, null);
+        String passJson = om.writeValueAsString(pass);
+        JsonNode pn = om.readTree(passJson);
+        assertEquals("PASS", pn.get("kind").asText());
+        assertFalse(pn.has("card_ids"), "PASS 不得序列化 card_ids: " + passJson);
+        assertFalse(pn.has("interpretation_key"), "PASS 不得序列化 interpretation_key: " + passJson);
+        assertFalse(pn.has("card_ids_present"), "presence 元数据不得进入 JSON: " + passJson);
+        assertFalse(pn.has("interpretation_key_present"), "presence 元数据不得进入 JSON: " + passJson);
+        assertEquals(pass, om.readValue(passJson, ActionRequest.class), "PASS 往返等价");
+
+        // PLAY 省略 interpretation_key：序列化不含该字段，往返等价
+        ActionRequest play = new ActionRequest("PLAY", List.of(4), null);
+        String playJson = om.writeValueAsString(play);
+        assertFalse(om.readTree(playJson).has("interpretation_key"), "省略键不序列化: " + playJson);
+        assertEquals(play, om.readValue(playJson, ActionRequest.class), "PLAY 往返等价");
+
+        // PLAY 带键往返等价
+        ActionRequest playKey = new ActionRequest("PLAY", List.of(4), "gd-v1-level2|SINGLE|1|3|4");
+        assertEquals(playKey, om.readValue(om.writeValueAsString(playKey), ActionRequest.class));
     }
 
     @Test
