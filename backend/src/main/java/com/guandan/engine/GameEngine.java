@@ -20,6 +20,7 @@ import com.guandan.rules.MoveClassifier;
 import com.guandan.rules.MoveComparator;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -361,7 +362,7 @@ public final class GameEngine {
         return new DomainEvent(EventType.PLAYED, playerId, payload);
     }
 
-    /** 百搭绑定公开载荷：{card_id, rank, suit}；仅同花顺 suit 为所声明花色，其余为 null。 */
+    /** 百搭绑定公开载荷：{card_id, rank, suit}；仅同花顺 suit 为所声明花色，其余为 null。深度冻结（保留 suit:null）。 */
     private static List<Map<String, Object>> wildBindingsPayload(Move move) {
         List<Map<String, Object>> out = new ArrayList<>();
         for (WildBinding wb : move.wildBindings()) {
@@ -369,9 +370,9 @@ public final class GameEngine {
             b.put("card_id", wb.cardId());
             b.put("rank", wb.rank());
             b.put("suit", wb.suit() == null ? null : wb.suit().name());
-            out.add(b);
+            out.add(Collections.unmodifiableMap(b));
         }
-        return out;
+        return List.copyOf(out);
     }
 
     private static DomainEvent trickClosedEvent(Integer nextLeader) {

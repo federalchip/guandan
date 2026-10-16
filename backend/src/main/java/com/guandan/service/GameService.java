@@ -195,11 +195,13 @@ public class GameService {
 
     /**
      * 请求体指纹（不含 request_id）：按位置逐元素 equals 的结构化列表，区分 null 与字符串 "null"、
-     * card_ids 逐张比较，避免字符串拼接的分隔符歧义导致同 id 异体误命中缓存。
+     * card_ids 逐张比较，避免字符串拼接的分隔符歧义导致同 id 异体误命中缓存。card_ids 存独立不可变
+     * 快照，防止调用方提交后改动原列表污染已缓存指纹。
      */
     private static List<Object> fingerprint(CommandRequest c) {
         ActionRequest a = c.action();
-        return Arrays.asList(c.expectedVersion(), a.kind(), a.cardIds(), a.interpretationKey());
+        List<Integer> cards = a.cardIds() == null ? null : List.copyOf(a.cardIds());
+        return Arrays.asList(c.expectedVersion(), a.kind(), cards, a.interpretationKey());
     }
 
     private static void requireVersion(GameState state, long expectedVersion) {

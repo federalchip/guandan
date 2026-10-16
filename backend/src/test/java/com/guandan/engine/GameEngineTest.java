@@ -292,6 +292,27 @@ class GameEngineTest {
         assertEquals("S", bindings.get(0).get("suit"), "同花顺 suit 为所声明花色");
     }
 
+    @Test
+    void test_played_event_wild_bindings_are_deeply_immutable() {
+        // 事件被服务层放入幂等缓存响应，嵌套结构必须深度冻结，且保留 suit:null
+        List<Integer> p0 = CardIds.parse("S3@0 H2@0");
+        GameState s = stateWithHands(List.of(
+                p0, CardIds.parse("S5@0"), CardIds.parse("S6@0"), CardIds.parse("S7@0")));
+        EngineOutcome out = GameEngine.applyAction(s, 0, Action.play(p0, null));
+        Map<String, Object> p = playedPayload(out);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> bindings = (List<Map<String, Object>>) p.get("wild_bindings");
+        assertEquals(1, bindings.size());
+        assertNull(bindings.get(0).get("suit"), "冻结后仍保留 suit:null");
+        // 外层列表不可变
+        assertThrows(UnsupportedOperationException.class, () -> bindings.add(Map.of()));
+        assertThrows(UnsupportedOperationException.class, () -> bindings.remove(0));
+        // 内层映射不可变
+        Map<String, Object> b0 = bindings.get(0);
+        assertThrows(UnsupportedOperationException.class, () -> b0.put("rank", 99));
+        assertThrows(UnsupportedOperationException.class, () -> b0.remove("suit"));
+    }
+
     private static Map<String, Object> playedPayload(EngineOutcome out) {
         DomainEvent played = out.events().stream()
                 .filter(e -> e.eventType() == EventType.PLAYED)

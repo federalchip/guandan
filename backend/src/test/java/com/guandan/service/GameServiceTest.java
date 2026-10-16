@@ -236,6 +236,32 @@ class GameServiceTest {
     }
 
     @Test
+    void test_cached_fingerprint_immune_to_caller_list_mutation() {
+        InMemoryGameStore store = new InMemoryGameStore();
+        GameService svc = service(store);
+        CreatedGame g = svc.createGame();
+        String id = g.gameId();
+        String token = g.sessionToken();
+        long v0 = g.state().version();
+        MoveView single = firstSingle(svc.legalActions(id, token));
+        String key = single.interpretationKey();
+        String reqId = UUID.randomUUID().toString();
+
+        List<Integer> mutable = new ArrayList<>(single.cardIds());
+        CommandResponse first = svc.submit(id, token,
+                new CommandRequest(reqId, v0, new ActionRequest("PLAY", mutable, key)));
+
+        // 调用方提交后改动原列表：缓存指纹应为独立不可变快照，不受影响
+        mutable.add(999);
+
+        // 用同 request_id 重试内容相同的原请求体，应幂等命中返回原收据，而非误报 REQUEST_ID_REUSED
+        List<Integer> retryCards = new ArrayList<>(single.cardIds());
+        CommandResponse retry = svc.submit(id, token,
+                new CommandRequest(reqId, v0, new ActionRequest("PLAY", retryCards, key)));
+        assertEquals(first.acceptedVersion(), retry.acceptedVersion(), "缓存指纹为快照，重试原命令仍幂等命中");
+    }
+
+    @Test
     void test_two_commands_same_version_only_one_commits() throws Exception {
         InMemoryGameStore store = new InMemoryGameStore();
         GameService svc = service(store);
