@@ -2,6 +2,10 @@ import type { components } from './schema'
 
 type CreatedGame = components['schemas']['CreatedGame']
 type GameView = components['schemas']['GameView']
+type CommandRequest = components['schemas']['CommandRequest']
+type CommandResponse = components['schemas']['CommandResponse']
+type ResolveResponse = components['schemas']['ResolveResponse']
+type LegalActionsResponse = components['schemas']['LegalActionsResponse']
 type ErrorBody = { code?: string; message?: string; details?: unknown }
 
 const BASE = '/api/v1'
@@ -27,13 +31,20 @@ async function toResult<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-/** T8 只需创建与恢复；resolve/legal-actions/submit 在 T9 增加。fetch 可注入以便测试。 */
+/** 游戏 HTTP 客户端。fetch 可注入以便测试；所有游戏路由（除创建）带 Bearer 令牌。 */
 export interface GameApi {
   createGame(): Promise<CreatedGame>
   getGame(gameId: string, token: string): Promise<GameView>
+  resolveSelection(gameId: string, token: string, expectedVersion: number, cardIds: number[]): Promise<ResolveResponse>
+  getLegalActions(gameId: string, token: string): Promise<LegalActionsResponse>
+  submitCommand(gameId: string, token: string, command: CommandRequest): Promise<CommandResponse>
 }
 
 export function createGameApi(fetchImpl: typeof fetch = fetch): GameApi {
+  const auth = (token: string): Record<string, string> => ({
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  })
   return {
     async createGame(): Promise<CreatedGame> {
       const res = await fetchImpl(`${BASE}/games`, {
@@ -48,6 +59,28 @@ export function createGameApi(fetchImpl: typeof fetch = fetch): GameApi {
         headers: { Authorization: `Bearer ${token}` },
       })
       return toResult<GameView>(res)
+    },
+    async resolveSelection(gameId, token, expectedVersion, cardIds): Promise<ResolveResponse> {
+      const res = await fetchImpl(`${BASE}/games/${encodeURIComponent(gameId)}/resolve`, {
+        method: 'POST',
+        headers: auth(token),
+        body: JSON.stringify({ expected_version: expectedVersion, card_ids: cardIds }),
+      })
+      return toResult<ResolveResponse>(res)
+    },
+    async getLegalActions(gameId: string, token: string): Promise<LegalActionsResponse> {
+      const res = await fetchImpl(`${BASE}/games/${encodeURIComponent(gameId)}/legal-actions`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      return toResult<LegalActionsResponse>(res)
+    },
+    async submitCommand(gameId, token, command): Promise<CommandResponse> {
+      const res = await fetchImpl(`${BASE}/games/${encodeURIComponent(gameId)}/actions`, {
+        method: 'POST',
+        headers: auth(token),
+        body: JSON.stringify(command),
+      })
+      return toResult<CommandResponse>(res)
     },
   }
 }

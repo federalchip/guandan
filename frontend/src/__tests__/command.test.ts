@@ -1,0 +1,585 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import { createGameState, type GameStore, type PendingCommand } from '../state/game'
+import type { GameApi } from '../api/game'
+import { ApiError } from '../api/game'
+import type { components } from '../api/schema'
+
+type CreatedGame = components['schemas']['CreatedGame']
+type CommandRequest = components['schemas']['CommandRequest']
+type CommandResponse = components['schemas']['CommandResponse']
+type ResolveResponse = components['schemas']['ResolveResponse']
+type LegalActionsResponse = components['schemas']['LegalActionsResponse']
+type GameView = components['schemas']['GameView']
+type EventView = components['schemas']['EventView']
+
+const SESSION_KEY = 'guandan.session'
+const PENDING_KEY = 'guandan.pending'
+
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  let reject!: (e: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0))
+
+function memStorage() {
+  const m = new Map<string, string>()
+  return {
+    getItem: (k: string) => (m.has(k) ? (m.get(k) as string) : null),
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    raw: m,
+  }
+}
+
+function viewOf(gameId: string, version: number, extra: Partial<GameView> = {}): GameView {
+  return {
+    game_id: gameId,
+    version,
+    phase: 'IN_PROGRESS',
+    current_player: 0,
+    is_lead: true,
+    can_pass: false,
+    remaining_counts: [27, 27, 27, 27],
+    own_hand: [],
+    ...extra,
+  }
+}
+
+function ack(command: CommandRequest, finalVersion: number, gameId = 'g1'): CommandResponse {
+  return {
+    request_id: command.request_id,
+    accepted_version: (command.expected_version ?? 0) + 1,
+    state: viewOf(gameId, finalVersion),
+    events: [],
+  }
+}
+
+function makeFake() {
+  const calls = {
+    resolve: [] as { expectedVersion: number; cardIds: number[] }[],
+    submit: [] as CommandRequest[],
+    legal: 0,
+    create: 0,
+    get: [] as string[],
+  }
+  const resp = {
+    resolve: async (ev: number): Promise<ResolveResponse> => ({ version: ev, choices: [] }),
+    submit: async (cmd: CommandRequest): Promise<CommandResponse> => ack(cmd, (cmd.expected_version ?? 0) + 1),
+    legal: async (): Promise<LegalActionsResponse> => ({ version: 0, moves: [], can_pass: false }),
+    create: async (): Promise<CreatedGame> => ({ game_id: 'gNew', session_token: 'tNew', state: viewOf('gNew', 0) }),
+    get: async (gid: string): Promise<GameView> => viewOf(gid, 0),
+  }
+  const api: GameApi = {
+    createGame: () => {
+      calls.create++
+      return resp.create()
+    },
+    getGame: (gid) => {
+      calls.get.push(gid)
+      return resp.get(gid)
+    },
+    resolveSelection: (_g, _t, ev, ids) => {
+      calls.resolve.push({ expectedVersion: ev, cardIds: ids })
+      return resp.resolve(ev)
+    },
+    getLegalActions: () => {
+      calls.legal++
+      return resp.legal()
+    },
+    submitCommand: (_g, _t, cmd) => {
+      calls.submit.push(cmd)
+      return resp.submit(cmd)
+    },
+  }
+  return { api, calls, resp }
+}
+
+const single = (key: string, ids: number[]): ResolveResponse => ({
+  version: 0,
+  choices: [{ kind: 'SINGLE', card_ids: ids, interpretation_key: key }],
+})
+
+function ev(seq: number, stateVersion: number, eventType = 'PLAYED'): EventView {
+  return { seq, state_version: stateVersion, event_type: eventType, actor_id: 0, payload: {} }
+}
+
+function respWith(command: CommandRequest, finalVersion: number, events: EventView[], gameId = 'g1'): CommandResponse {
+  return {
+    request_id: command.request_id,
+    accepted_version: (command.expected_version ?? 0) + 1,
+    state: viewOf(gameId, finalVersion),
+    events,
+  }
+}
+
+let idSeq = 0
+beforeEach(() => {
+  idSeq = 0
+})
+
+function activeStore(api: GameApi, storage: ReturnType<typeof memStorage>): GameStore {
+  const store = createGameState({ api, storage, newRequestId: () => `r${++idSeq}` })
+  store.setSession('g1', 't1')
+  store.applySnapshot('g1', viewOf('g1', 0))
+  return store
+}
+
+// 动画开启 + 手动步进调度 + onEvent 观察，用于事件播放/取消用例。
+function animFixture(version = 0) {
+  const fake = makeFake()
+  const storage = memStorage()
+  const steps: (() => void)[] = []
+  const played: EventView[] = []
+  const store = createGameState({
+    api: fake.api,
+    storage,
+    newRequestId: () => `r${++idSeq}`,
+    animate: true,
+    scheduleStep: (fn) => void steps.push(fn),
+    onEvent: (e) => void played.push(e),
+  })
+  store.setSession('g1', 't1')
+  store.applySnapshot('g1', viewOf('g1', version))
+  const step = () => steps.shift()?.()
+  const drain = () => {
+    let guard = 0
+    while (steps.length && guard++ < 200) steps.shift()!()
+  }
+  return { fake, storage, steps, played, store, step, drain }
+}
+
+describe('T9 声明流程', () => {
+  it('test_resolve_zero_choices_does_not_submit', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async (ev) => ({ version: ev, choices: [] })
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    store.toggleSelected(9)
+    await store.playSelection()
+    expect(fake.calls.submit.length).toBe(0)
+    expect(store.state.busy).toBe(false)
+    expect(store.state.notice).toContain('不可出')
+    expect(store.state.selected.size).toBe(2) // 保留可修正选牌
+  })
+
+  it('test_resolve_single_choice_submits_with_key', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].action?.interpretation_key).toBe('K1')
+    expect(fake.calls.submit[0].action?.card_ids).toEqual([4])
+    expect(store.state.pending).toBeNull()
+    expect(store.state.busy).toBe(false)
+  })
+
+  it('test_resolve_multi_choices_waits_for_pick', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => ({
+      version: 0,
+      choices: [
+        { kind: 'STRAIGHT', card_ids: [1, 2, 3, 4, 5], interpretation_key: 'K1' },
+        { kind: 'STRAIGHT_FLUSH', card_ids: [1, 2, 3, 4, 5], interpretation_key: 'K2' },
+      ],
+    })
+    const store = activeStore(fake.api, storage)
+    ;[1, 2, 3, 4, 5].forEach((id) => store.toggleSelected(id))
+    await store.playSelection()
+    expect(fake.calls.submit.length).toBe(0) // 未选定不提交
+    expect(store.state.choices?.length).toBe(2)
+    expect(store.state.busy).toBe(true) // 弹窗期间锁定
+    await store.pickDeclaration('K2')
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].action?.interpretation_key).toBe('K2')
+    expect(store.state.choices).toBeNull()
+  })
+})
+
+describe('T9 pending 幂等/重试/跨局', () => {
+  it('test_timeout_retry_reuses_exact_command', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    let n = 0
+    fake.resp.submit = (cmd) => (n++ === 0 ? Promise.reject(new Error('network timeout')) : Promise.resolve(ack(cmd, 1)))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection() // 提交#1 结果不明
+    expect(store.state.pending).not.toBeNull()
+    expect(store.state.busy).toBe(true) // 锁住新出牌
+    const first = fake.calls.submit[0]
+    await store.retryPendingCommand() // 提交#2 原样重试
+    expect(fake.calls.submit.length).toBe(2)
+    expect(fake.calls.submit[1]).toEqual(first) // 完全相同的命令（含 request_id）
+    expect(fake.calls.submit[1].request_id).toBe(first.request_id)
+    expect(store.state.pending).toBeNull()
+    expect(store.state.busy).toBe(false)
+  })
+
+  it('test_double_click_only_sends_one_command', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const d = deferred<CommandResponse>()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p1 = store.playSelection()
+    const p2 = store.playSelection() // 应被 busy 锁忽略
+    await flush()
+    expect(fake.calls.submit.length).toBe(1)
+    d.resolve(ack(fake.calls.submit[0], 1))
+    await flush()
+    await Promise.all([p1, p2])
+  })
+
+  it('test_refresh_recovers_pending_command', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    const persisted: PendingCommand = {
+      game_id: 'g1',
+      command: { request_id: 'rPersisted', expected_version: 0, action: { kind: 'PASS' } },
+    }
+    storage.setItem(PENDING_KEY, JSON.stringify(persisted))
+    fake.resp.get = async (gid) => viewOf(gid, 3)
+    fake.resp.submit = async (cmd) => ack(cmd, 4)
+    const store = createGameState({ api: fake.api, storage, newRequestId: () => `r${++idSeq}` })
+    await store.recover()
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].request_id).toBe('rPersisted') // 原样重试
+    expect(fake.calls.submit[0].action?.kind).toBe('PASS')
+    expect(store.state.pending).toBeNull() // 成功后清除
+  })
+
+  it('test_delayed_response_does_not_regress_version', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const d = deferred<CommandResponse>()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p = store.playSelection()
+    await flush() // 提交在途，expected_version=0
+    store.applySnapshot('g1', viewOf('g1', 8)) // 期间采用更新快照 v8
+    expect(store.state.view?.version).toBe(8)
+    d.resolve(ack(fake.calls.submit[0], 4)) // 迟到响应 final v4
+    await flush()
+    await p
+    expect(store.state.view?.version).toBe(8) // 不倒退
+  })
+
+  it('test_pending_command_is_bound_to_game', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new Error('timeout')) // 保留 pending
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(store.state.pending?.game_id).toBe('g1')
+    // 切到另一局
+    store.setSession('g2', 't2')
+    store.applySnapshot('g2', viewOf('g2', 0))
+    const before = fake.calls.submit.length
+    await store.retryPendingCommand()
+    expect(fake.calls.submit.length).toBe(before) // 跨局 pending 不提交
+    expect(store.state.pending).toBeNull() // 丢弃
+  })
+
+  it('test_old_ack_cannot_clear_new_pending', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const dA = deferred<CommandResponse>()
+    const dB = deferred<CommandResponse>()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => dA.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const pA = store.playSelection()
+    await flush()
+    const rA = fake.calls.submit[0].request_id
+    expect(store.state.pending?.command.request_id).toBe(rA)
+    // A 在途时另开新局（generation++，清 pending）
+    await store.createGame()
+    expect(store.state.pending).toBeNull()
+    // 在 gNew 提交 B（在途）
+    fake.resp.submit = () => dB.promise
+    store.toggleSelected(48)
+    const pB = store.playSelection()
+    await flush()
+    const rB = fake.calls.submit[1].request_id
+    expect(rB).not.toBe(rA)
+    expect(store.state.pending?.command.request_id).toBe(rB)
+    // A 的迟到 ack 到达，不得清除 B
+    dA.resolve({ request_id: rA, accepted_version: 1, state: viewOf('g1', 1), events: [] })
+    await flush()
+    expect(store.state.pending?.command.request_id).toBe(rB)
+    dB.resolve(ack(fake.calls.submit[1], 1, 'gNew'))
+    await flush()
+    await Promise.all([pA, pB])
+  })
+
+  it('test_successful_new_game_clears_old_pending', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new Error('timeout'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(store.state.pending).not.toBeNull()
+    expect(storage.raw.has(PENDING_KEY)).toBe(true)
+    await store.createGame()
+    expect(store.state.pending).toBeNull()
+    expect(storage.raw.has(PENDING_KEY)).toBe(false)
+  })
+
+  it('test_failed_new_game_keeps_pending', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new Error('timeout'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(store.state.pending).not.toBeNull()
+    fake.resp.create = () => Promise.reject(new Error('create failed'))
+    await store.createGame()
+    expect(store.state.pending).not.toBeNull() // 保留旧局 pending
+    expect(store.state.gameId).toBe('g1') // 保留旧局
+  })
+})
+
+describe('T9 事件播放/权威-展示分离/动画代次', () => {
+  it('test_same_version_events_all_play_once', async () => {
+    const fx = animFixture(0)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    const events = [ev(1, 1), ev(2, 1), ev(3, 1)] // 共享 state_version=1
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 1, events)
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection()
+    fx.drain()
+    expect(fx.played.map((e) => e.seq)).toEqual([1, 2, 3]) // 不按版本跳过，全部各播一次
+    expect(fx.store.state.display?.version).toBe(1)
+    expect(fx.store.state.animating).toBe(false)
+    expect(fx.store.state.busy).toBe(false)
+  })
+
+  it('test_duplicate_response_does_not_replay_events', async () => {
+    const fx = animFixture(0)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    const events = [ev(1, 1), ev(2, 2)]
+    const d1 = deferred<CommandResponse>()
+    const d2 = deferred<CommandResponse>()
+    let n = 0
+    fx.fake.resp.submit = () => (n++ === 0 ? d1.promise : d2.promise)
+    fx.store.toggleSelected(4)
+    const p1 = fx.store.playSelection()
+    await flush() // 提交#1 在途，pending rA
+    const p2 = fx.store.retryPendingCommand() // 提交#2（同 request_id）在途
+    await flush()
+    const R = respWith(fx.fake.calls.submit[0], 2, events)
+    d1.resolve(R)
+    await flush()
+    fx.drain()
+    expect(fx.played.length).toBe(2)
+    d2.resolve(R) // 重复（幂等缓存）响应
+    await flush()
+    fx.drain()
+    expect(fx.played.length).toBe(2) // 不重播
+    await Promise.all([p1, p2])
+  })
+
+  it('test_recovery_snapshot_suppresses_cached_events', async () => {
+    const fx = animFixture(0)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    const d = deferred<CommandResponse>()
+    fx.fake.resp.submit = () => d.promise
+    fx.store.toggleSelected(4)
+    const p = fx.store.playSelection()
+    await flush() // 提交在途，expected_version=0
+    fx.store.applySnapshot('g1', viewOf('g1', 8)) // GET 恢复到 v8（服务端已推进）
+    expect(fx.store.state.display?.version).toBe(8)
+    d.resolve(respWith(fx.fake.calls.submit[0], 8, [ev(5, 8)])) // 缓存响应 final v8
+    await flush()
+    fx.drain()
+    expect(fx.played.length).toBe(0) // 已被快照覆盖，不重播
+    expect(fx.store.state.display?.version).toBe(8) // 不倒退
+    expect(fx.store.state.pending).toBeNull() // 仅确认 pending
+    await p
+  })
+
+  it('test_new_snapshot_cancels_animation', async () => {
+    const fx = animFixture(8)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 12, [ev(9, 9), ev(10, 10), ev(11, 11), ev(12, 12)])
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection()
+    expect(fx.store.state.animating).toBe(true)
+    expect(fx.store.state.display?.version).toBe(8) // 播放中仍为基准
+    fx.step() // 播放 seq9
+    expect(fx.played.map((e) => e.seq)).toEqual([9])
+    fx.store.applySnapshot('g1', viewOf('g1', 12)) // 更新快照到达 → 取消动画
+    expect(fx.store.state.display?.version).toBe(12)
+    expect(fx.store.state.animating).toBe(false)
+    fx.drain() // 剩余步为陈旧回调
+    expect(fx.played.map((e) => e.seq)).toEqual([9]) // 未再播放
+    expect(fx.store.state.display?.version).toBe(12)
+  })
+
+  it('test_missing_animation_base_applies_snapshot', async () => {
+    const fx = animFixture(5)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    const d = deferred<CommandResponse>()
+    fx.fake.resp.submit = () => d.promise
+    fx.store.toggleSelected(4)
+    const p = fx.store.playSelection() // expected_version=5
+    await flush()
+    fx.store.applySnapshot('g1', viewOf('g1', 6)) // 展示基准前移到 6
+    d.resolve(respWith(fx.fake.calls.submit[0], 7, [ev(6, 6), ev(7, 7)])) // 基准 6≠expected 5
+    await flush()
+    fx.drain()
+    expect(fx.played.length).toBe(0) // 无匹配起点不播放残缺序列
+    expect(fx.store.state.display?.version).toBe(7) // 直接采用较新最终快照
+    await p
+  })
+
+  it('test_cancelled_callback_cannot_mutate_view', async () => {
+    const fx = animFixture(8)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 12, [ev(9, 9), ev(10, 10), ev(11, 11), ev(12, 12)])
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection() // 已调度首步，display 仍 v8
+    fx.store.applySnapshot('g1', viewOf('g1', 13)) // 取消动画，采用 v13
+    expect(fx.store.state.display?.version).toBe(13)
+    fx.step() // 触发一个陈旧回调
+    expect(fx.store.state.display?.version).toBe(13) // 不得回写
+    expect(fx.played.length).toBe(0)
+  })
+
+  it('test_animation_blocks_new_command', async () => {
+    const fx = animFixture(0)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 2, [ev(1, 1), ev(2, 2)])
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection()
+    expect(fx.store.state.animating).toBe(true)
+    expect(fx.store.state.busy).toBe(true)
+    const resolvesBefore = fx.fake.calls.resolve.length
+    const submitsBefore = fx.fake.calls.submit.length
+    fx.store.toggleSelected(8)
+    await fx.store.playSelection() // 播放期间禁止
+    await fx.store.passTurn() // 播放期间禁止
+    expect(fx.fake.calls.resolve.length).toBe(resolvesBefore)
+    expect(fx.fake.calls.submit.length).toBe(submitsBefore)
+    fx.drain()
+    expect(fx.store.state.busy).toBe(false)
+  })
+})
+
+describe('T9 提示/过牌/断网/非法动作', () => {
+  it('test_hint_selects_only_backend_entity_ids', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.legal = async () => ({
+      version: 0,
+      moves: [
+        { kind: 'SINGLE', card_ids: [4], interpretation_key: 'h1' },
+        { kind: 'PAIR', card_ids: [10, 11], interpretation_key: 'h2' },
+      ],
+      can_pass: true,
+    })
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(99) // 无关选择应被替换
+    await store.cycleHint()
+    expect([...store.state.selected]).toEqual([4]) // 只用后端给出的实体 ID
+    await store.cycleHint()
+    expect([...store.state.selected].sort((a, b) => a - b)).toEqual([10, 11]) // 循环到下一个
+    expect(store.state.canPass).toBe(true)
+  })
+
+  it('test_hint_cycles_back_to_first', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.legal = async () => ({
+      version: 0,
+      moves: [
+        { kind: 'SINGLE', card_ids: [4], interpretation_key: 'h1' },
+        { kind: 'SINGLE', card_ids: [5], interpretation_key: 'h2' },
+      ],
+      can_pass: false,
+    })
+    const store = activeStore(fake.api, storage)
+    await store.cycleHint()
+    expect([...store.state.selected]).toEqual([4])
+    await store.cycleHint()
+    expect([...store.state.selected]).toEqual([5])
+    await store.cycleHint()
+    expect([...store.state.selected]).toEqual([4]) // 再次提示回到第一个
+  })
+
+  it('test_lead_disables_pass', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const store = activeStore(fake.api, storage) // viewOf 默认 can_pass:false（领出）
+    expect(store.state.canPass).toBe(false)
+    await store.passTurn()
+    expect(fake.calls.submit.length).toBe(0)
+    expect(store.state.notice).toContain('过牌')
+  })
+
+  it('test_pass_submits_when_allowed', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const store = createGameState({ api: fake.api, storage, newRequestId: () => `r${++idSeq}` })
+    store.setSession('g1', 't1')
+    store.applySnapshot('g1', viewOf('g1', 0, { can_pass: true, is_lead: false, current_player: 0 }))
+    expect(store.state.canPass).toBe(true)
+    await store.passTurn()
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].action?.kind).toBe('PASS')
+  })
+
+  it('test_invalid_move_keeps_fixable_selection', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(400, 'INVALID_MOVE', '压不过桌面'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(store.state.selected.has(4)).toBe(true) // 保留可修正选牌
+    expect(store.state.pending).toBeNull() // 业务拒绝清除对应 pending
+    expect(store.state.busy).toBe(false)
+    expect(store.state.notice).toContain('INVALID_MOVE')
+  })
+
+  it('test_offline_keeps_view_and_pending', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new Error('network down'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const before = store.state.display
+    await store.playSelection()
+    expect(store.state.display).toBe(before) // 断网保留视图
+    expect(store.state.view).not.toBeNull()
+    expect(store.state.pending).not.toBeNull() // 保留 pending 供重试
+    expect(store.state.busy).toBe(true) // 锁住新出牌/过牌
+    expect(store.state.notice).toContain('网络异常')
+  })
+})

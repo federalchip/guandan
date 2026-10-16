@@ -1,6 +1,20 @@
 <script setup lang="ts">
-defineProps<{ started: boolean; selectedCount: number }>()
-const emit = defineEmits<{ (e: 'start'): void; (e: 'restart'): void }>()
+defineProps<{
+  started: boolean
+  finished: boolean
+  canAct: boolean // 已同步、无 pending/动画、且轮到真人
+  canPass: boolean
+  canRetry: boolean // 存在待确认命令（结果不明），可原样重试
+  selectedCount: number
+}>()
+const emit = defineEmits<{
+  (e: 'start'): void
+  (e: 'restart'): void
+  (e: 'play'): void
+  (e: 'pass'): void
+  (e: 'hint'): void
+  (e: 'retry'): void
+}>()
 </script>
 
 <template>
@@ -8,8 +22,14 @@ const emit = defineEmits<{ (e: 'start'): void; (e: 'restart'): void }>()
     <div class="status">单局 · 两副牌 108 张 · 固定打 2</div>
     <div class="buttons">
       <button v-if="!started" type="button" @click="emit('start')">开始一局</button>
-      <button v-else type="button" @click="emit('restart')">再来一局</button>
-      <span class="sel-count">已选 {{ selectedCount }} 张</span>
+      <template v-else>
+        <button type="button" :disabled="!canAct || selectedCount === 0" @click="emit('play')">出牌</button>
+        <button type="button" :disabled="!canAct || !canPass" @click="emit('pass')">过牌</button>
+        <button type="button" :disabled="!canAct" @click="emit('hint')">提示</button>
+        <button v-if="canRetry" type="button" class="retry" @click="emit('retry')">重试</button>
+        <button type="button" class="restart" @click="emit('restart')">再来一局</button>
+        <span class="sel-count">已选 {{ selectedCount }} 张</span>
+      </template>
     </div>
   </div>
 </template>
@@ -31,7 +51,8 @@ const emit = defineEmits<{ (e: 'start'): void; (e: 'restart'): void }>()
 .buttons {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 button {
   padding: 6px 16px;
@@ -41,6 +62,19 @@ button {
   color: #1f2937;
   font-weight: 700;
   cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.restart {
+  background: transparent;
+  color: #f59e0b;
+}
+button.retry {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
 }
 .sel-count {
   font-size: 13px;
