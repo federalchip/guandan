@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { createGameState } from './state/game'
+import { sortHandForDisplay, LEVEL_RANK } from './state/handOrder'
 import { createGameApi, ApiError } from './api/game'
 import Table from './components/Table.vue'
 import Hand from './components/Hand.vue'
@@ -13,10 +14,14 @@ const store = createGameState()
 const api = createGameApi()
 const notice = ref<string | null>(null)
 
+// 会话代次：每次成功建立新局自增。恢复请求在 await 前记录代次，回调时若代次已变，
+// 说明用户已另开新局，这条迟到的旧局响应（成功或失败）必须整体忽略，不得回写状态/存储/提示。
+let sessionGen = 0
+
 const view = computed(() => store.state.view)
 const started = computed(() => view.value !== null)
 const finished = computed(() => view.value?.phase === 'FINISHED')
-const ownHand = computed(() => view.value?.own_hand ?? [])
+const ownHand = computed(() => sortHandForDisplay(view.value?.own_hand ?? [], view.value?.level_rank ?? LEVEL_RANK))
 const selectedCount = computed(() => store.state.selected.size)
 const result = computed(() => view.value?.result ?? null)
 
@@ -36,6 +41,7 @@ async function startGame() {
     const created = await api.createGame()
     const { game_id: gameId, session_token: token, state } = created
     if (!gameId || !token || !state) throw new Error('创建响应缺少字段')
+    sessionGen++ // 新局已建立，作废所有在途的旧局恢复回调
     store.clearGame()
     store.setSession(gameId, token)
     store.applySnapshot(gameId, state)
@@ -59,12 +65,15 @@ async function recover() {
     return
   }
   if (!gameId || !token) return
+  const gen = sessionGen // 记录发起恢复时的会话代次
   try {
     const fresh = await api.getGame(gameId, token)
+    if (gen !== sessionGen) return // 期间已另开新局，丢弃迟到的旧局快照
     store.clearGame()
     store.setSession(gameId, token)
     store.applySnapshot(gameId, fresh)
   } catch (e) {
+    if (gen !== sessionGen) return // 迟到的旧局失败不得清除新局或改写提示
     sessionStorage.removeItem(STORAGE_KEY)
     store.clearGame()
     notice.value = e instanceof ApiError && e.status === 404 ? '本局已失效，请重新开始' : messageOf(e)
