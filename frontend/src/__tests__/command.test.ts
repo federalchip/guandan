@@ -836,3 +836,34 @@ describe('T9 复审修复：恢复/重同步/陈旧响应/动画开关', () => {
     expect(fx.store.state.display?.version).toBe(2) // 收敛到最终快照
   })
 })
+
+describe('T9 复审第三轮：重同步断网保持锁定', () => {
+  it('test_resync_network_error_keeps_locked_until_retry', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '冲突'))
+    const resyncOk = deferred<GameView>()
+    let getN = 0
+    fake.resp.get = () => (getN++ === 0 ? Promise.reject(new Error('network')) : resyncOk.promise)
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    await flush()
+    // 重同步 GET 网络失败：必须仍锁定，不得基于未同步的旧快照出牌
+    expect(store.state.busy).toBe(true)
+    expect(store.state.needsResync).toBe(true)
+    const resolvesBefore = fake.calls.resolve.length
+    await store.playSelection() // 被 busy 拦下
+    expect(fake.calls.resolve.length).toBe(resolvesBefore)
+    // 用户点重试：无 pending 时走重同步，再次 GET
+    const p = store.retryPendingCommand()
+    await flush()
+    resyncOk.resolve(viewOf('g1', 9))
+    await flush()
+    await p
+    expect(store.state.view?.version).toBe(9)
+    expect(store.state.busy).toBe(false)
+    expect(store.state.needsResync).toBe(false)
+  })
+})

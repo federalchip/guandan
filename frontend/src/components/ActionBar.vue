@@ -4,7 +4,7 @@ defineProps<{
   finished: boolean
   canAct: boolean // 已同步、无 pending/动画、且轮到真人
   canPass: boolean
-  canRetry: boolean // 存在待确认命令（结果不明），可原样重试
+  canRetry: boolean // 结果不明或需重同步：可原样重试/重新拉取快照（未开始态也需可见）
   selectedCount: number
 }>()
 const emit = defineEmits<{
@@ -21,12 +21,12 @@ const emit = defineEmits<{
   <div class="action-bar">
     <div class="status">单局 · 两副牌 108 张 · 固定打 2</div>
     <div class="buttons">
+      <button v-if="canRetry" type="button" class="retry" @click="emit('retry')">重试</button>
       <button v-if="!started" type="button" @click="emit('start')">开始一局</button>
       <template v-else>
         <button type="button" :disabled="!canAct || selectedCount === 0" @click="emit('play')">出牌</button>
         <button type="button" :disabled="!canAct || !canPass" @click="emit('pass')">过牌</button>
         <button type="button" :disabled="!canAct" @click="emit('hint')">提示</button>
-        <button v-if="canRetry" type="button" class="retry" @click="emit('retry')">重试</button>
         <button type="button" class="restart" @click="emit('restart')">再来一局</button>
         <span class="sel-count">已选 {{ selectedCount }} 张</span>
       </template>

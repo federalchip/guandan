@@ -42,8 +42,8 @@ const result = computed(() => view.value?.result ?? null)
 const notice = computed(() => store.state.notice)
 const choices = computed(() => store.state.choices)
 const canPass = computed(() => store.state.canPass)
-// 仅在“结果不明”（5xx/网络且 pending 仍在）时暴露重试；正常在途请求不显示，避免重复重试锁死。
-const canRetry = computed(() => store.state.awaitingRetry)
+// 结果不明（5xx/网络且 pending 仍在）或版本冲突重同步失败时暴露重试；正常在途请求不显示。
+const canRetry = computed(() => store.state.awaitingRetry || store.state.needsResync)
 const playback = computed(() => (store.state.animating && lastEvent.value ? describeEvent(lastEvent.value) : null))
 // 仅当前局已同步（无 pending/动画/解析）、未结束且轮到真人时可操作。
 const canAct = computed(
@@ -93,7 +93,7 @@ onMounted(() => store.recover())
       <Hand :cards="ownHand" :selected="store.state.selected" @select="store.toggleSelected" />
       <ResultPanel v-if="finished && result" :result="result" />
     </template>
-    <p v-else class="hint">点击「开始一局」发牌。</p>
+    <p v-else-if="!canRetry" class="hint">点击「开始一局」发牌。</p>
   </div>
 </template>
 

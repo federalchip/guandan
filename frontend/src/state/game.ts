@@ -55,6 +55,7 @@ export interface GameStore {
     animating: boolean
     animate: boolean // 动画开关：关闭时命令响应直接采用最终快照，不逐事件播放
     awaitingRetry: boolean // 结果不明（5xx/网络）且 pending 仍在，向用户暴露“重试”
+    needsResync: boolean // 版本冲突后重同步失败：锁定操作，暴露“重试”以重新拉取权威快照
     notice: string | null
   }
   toggleSelected(cardId: number): void
@@ -122,6 +123,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     animating: false,
     animate: options.animate ?? false,
     awaitingRetry: false,
+    needsResync: false,
     notice: null as string | null,
   })
 
@@ -267,6 +269,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     state.canPass = false
     state.busy = false
     state.animating = false
+    state.needsResync = false
     state.selected.clear()
     processedRequests.clear()
     processedSeq.clear()
@@ -419,6 +422,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     resolveContext = null
     state.hintMoves = []
     state.hintIndex = -1
+    state.needsResync = false // 命令已被权威接受，恢复同步态
     state.notice = null
   }
 
@@ -479,6 +483,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       const fresh = await client.getGame(gameId, token)
       if (gen !== generation || gameId !== state.gameId) return // 已被新局接管，busy 由新局管理
       adoptIfNewer(gameId, fresh)
+      state.needsResync = false
       state.busy = state.animating || state.pending !== null // 重同步取得权威快照，释放冲突锁
     } catch (e) {
       if (gen !== generation || gameId !== state.gameId) return
@@ -486,7 +491,10 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
         invalidateSession() // 重同步发现本局已失效
         return
       }
-      state.busy = false // 其它错误：解锁但保留原业务拒绝提示
+      // 重同步瞬时失败（网络/5xx）：不得解锁到未同步的旧快照，保持锁定并暴露“重试”重新拉取
+      state.needsResync = true
+      state.busy = true
+      state.notice = '重同步失败，请重试'
     }
   }
 
@@ -620,14 +628,21 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
 
   async function retryPendingCommand(): Promise<void> {
     const p = state.pending
-    if (!p) return
-    if (p.game_id !== state.gameId || !state.token) {
-      dropPending() // 跨局 pending 不得提交
-      state.busy = false
+    if (p) {
+      if (p.game_id !== state.gameId || !state.token) {
+        dropPending() // 跨局 pending 不得提交
+        state.busy = false
+        return
+      }
+      // 原样重试：复用原 request_id 与原请求体
+      await submit(p.command, p.game_id, state.token, generation)
       return
     }
-    // 原样重试：复用原 request_id 与原请求体
-    await submit(p.command, p.game_id, state.token, generation)
+    // 无待确认命令但处于“需重同步”锁定态（版本冲突后重同步失败）：重新拉取权威快照
+    if (state.needsResync && state.gameId && state.token) {
+      state.busy = true
+      await resync()
+    }
   }
 
   async function cycleHint(): Promise<void> {
