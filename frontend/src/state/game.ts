@@ -179,6 +179,11 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     displayGen++
     state.display = view
     state.animating = false
+    if (state.needsResync) {
+      // 权威快照已足以完成同步：解除重同步锁并清除过期的“重同步失败”提示
+      state.needsResync = false
+      state.notice = null
+    }
     state.busy = state.pending !== null
   }
 

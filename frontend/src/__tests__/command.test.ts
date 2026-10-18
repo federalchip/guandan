@@ -984,4 +984,38 @@ describe('T9 复审第四轮：重同步防竞态 + 播放需匹配展示起点'
     expect(fx.played.map((e) => e.seq)).toEqual([1, 2, 3]) // 有匹配起点 → 按序播放
     expect(fx.store.state.display?.version).toBe(3)
   })
+
+  it('test_newer_snapshot_during_inflight_retry_clears_needs_resync', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '冲突'))
+    fake.resp.get = () => Promise.reject(new Error('network')) // 首次重同步失败
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection() // 409 → resync#1 失败 → needsResync=true、busy=true
+    await flush()
+    expect(store.state.needsResync).toBe(true)
+    expect(store.state.busy).toBe(true)
+    expect(store.state.notice).toContain('重同步失败')
+    // 用户重试：resync#2 GET 在途（挂起）
+    const d = deferred<GameView>()
+    fake.resp.get = () => d.promise
+    const r = store.retryPendingCommand()
+    await flush()
+    expect(store.state.busy).toBe(true) // 在途仍锁定
+    // 较新权威快照落地（足以完成同步）：应解除重同步锁并清除过期提示
+    store.applySnapshot('g1', viewOf('g1', 9))
+    expect(store.state.needsResync).toBe(false)
+    expect(store.state.busy).toBe(false) // 解锁，可正常操作
+    expect(store.state.notice).toBeNull()
+    // 旧 GET 随后失败：过期请求忽略，不得重新上锁或复活重试
+    d.reject(new Error('network late'))
+    await flush()
+    await r
+    expect(store.state.busy).toBe(false)
+    expect(store.state.needsResync).toBe(false)
+    expect(store.state.awaitingRetry).toBe(false)
+    expect(store.state.view?.version).toBe(9)
+  })
 })
