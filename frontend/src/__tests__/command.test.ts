@@ -867,3 +867,121 @@ describe('T9 复审第三轮：重同步断网保持锁定', () => {
     expect(store.state.needsResync).toBe(false)
   })
 })
+
+describe('T9 复审第四轮：重同步防竞态 + 播放需匹配展示起点', () => {
+  it('test_consecutive_retry_issues_single_resync_get', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '冲突'))
+    fake.resp.get = () => Promise.reject(new Error('network')) // 首次重同步失败 → needsResync
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    await flush()
+    expect(store.state.needsResync).toBe(true)
+    expect(store.state.busy).toBe(true)
+    // 第二次重同步用挂起 GET；连续触发只应产生一个在途 GET
+    const d = deferred<GameView>()
+    fake.resp.get = () => d.promise
+    const before = fake.calls.get.length
+    const r1 = store.retryPendingCommand()
+    await flush()
+    const r2 = store.retryPendingCommand() // 在途期间的重复触发
+    await flush()
+    expect(fake.calls.get.length).toBe(before + 1) // 状态层守卫：只多一个 GET
+    d.resolve(viewOf('g1', 7))
+    await flush()
+    await Promise.all([r1, r2])
+    expect(store.state.view?.version).toBe(7)
+    expect(store.state.busy).toBe(false)
+    expect(store.state.needsResync).toBe(false)
+  })
+
+  it('test_stale_resync_failure_after_newer_snapshot_does_not_relock', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '冲突'))
+    const d = deferred<GameView>()
+    fake.resp.get = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection() // 409 → 重同步 GET 在途
+    await flush()
+    expect(store.state.busy).toBe(true)
+    // 较新结果：另一路径采用更新快照（恢复/命令响应），解锁并前移展示代次
+    store.applySnapshot('g1', viewOf('g1', 9))
+    expect(store.state.busy).toBe(false)
+    // 旧 GET 随后失败：过期请求不得重新上锁或改写状态
+    d.reject(new Error('network late'))
+    await flush()
+    expect(store.state.busy).toBe(false)
+    expect(store.state.needsResync).toBe(false)
+    expect(store.state.view?.version).toBe(9)
+  })
+
+  it('test_resync_returning_after_new_game_does_not_write_back', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '冲突'))
+    const d = deferred<GameView>()
+    fake.resp.get = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection() // g1 的重同步 GET 在途
+    await flush()
+    await store.createGame() // 切换新局 gNew（generation++）
+    expect(store.state.gameId).toBe('gNew')
+    d.resolve(viewOf('g1', 99)) // 旧局 GET 迟到成功
+    await flush()
+    expect(store.state.view?.game_id).toBe('gNew') // 不回写旧局
+    expect(store.state.view?.version).not.toBe(99)
+  })
+
+  it('test_retry_with_null_display_shows_final_snapshot_without_playback', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    const steps: (() => void)[] = []
+    const played: EventView[] = []
+    const store = createGameState({
+      api: fake.api,
+      storage,
+      newRequestId: () => `r${++idSeq}`,
+      animate: true,
+      scheduleStep: (fn) => void steps.push(fn),
+      onEvent: (e) => void played.push(e),
+    })
+    // 断网刷新：会话+pending 保留，恢复 GET 失败 → display=null
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    const persisted: PendingCommand = {
+      game_id: 'g1',
+      command: { request_id: 'rP', expected_version: 0, action: { kind: 'PASS' } },
+    }
+    storage.setItem(PENDING_KEY, JSON.stringify(persisted))
+    fake.resp.get = () => Promise.reject(new Error('network'))
+    await store.recover()
+    expect(store.state.display).toBeNull()
+    expect(store.state.pending?.command.request_id).toBe('rP')
+    // 重试成功，响应含多个事件；display=null 不能当播放起点（不得用版本 0 代替）
+    fake.resp.submit = async (cmd) => respWith(cmd, 3, [ev(1, 1), ev(2, 2), ev(3, 3)])
+    await store.retryPendingCommand()
+    expect(store.state.display?.version).toBe(3) // 直接展示最终快照
+    expect(store.state.animating).toBe(false)
+    expect(played.length).toBe(0) // 未触发事件回调
+    expect(steps.length).toBe(0) // 未调度播放
+    expect(store.state.pending).toBeNull() // pending 已按流程确认
+  })
+
+  it('test_normal_playback_still_plays_in_order_with_display_base', async () => {
+    const fx = animFixture(0) // display 存在且 version=0
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 3, [ev(1, 1), ev(2, 2), ev(3, 3)])
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection() // expected_version=0，display.version=0 匹配
+    fx.drain()
+    expect(fx.played.map((e) => e.seq)).toEqual([1, 2, 3]) // 有匹配起点 → 按序播放
+    expect(fx.store.state.display?.version).toBe(3)
+  })
+})

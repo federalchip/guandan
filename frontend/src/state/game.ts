@@ -135,6 +135,9 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   let resolveContext: { gameId: string; token: string; cardIds: number[]; expectedVersion: number; gen: number } | null = null
   // 本地展示代次：每次开始播放/直接采用快照/取消动画时自增；动画步进回调据此判定是否已被取消。
   let displayGen = 0
+  // 重同步防竞态：同一局只允许一个 GET 在途；resyncSeq 标识当前有效请求，过期响应一律不回写。
+  let resyncInFlight = false
+  let resyncSeq = 0
   // 事件去重：已完整处理（播放或被快照覆盖）的批次 request_id 与事件 seq。
   const processedRequests = new Set<string>()
   const processedSeq = new Set<number>()
@@ -273,6 +276,8 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     state.selected.clear()
     processedRequests.clear()
     processedSeq.clear()
+    resyncInFlight = false // 作废任何在途重同步，避免跨局误解锁/误拦
+    resyncSeq++
     displayGen++ // 取消任何在途动画回调
   }
 
@@ -384,7 +389,8 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     const snap = response.state
     const events = response.events ?? []
     const expected = command.expected_version ?? 0
-    const baseVersion = state.display?.version ?? 0 // 响应前的展示基准（动画起点）
+    const base = state.display // 动画起点：必须真实存在，display=null 不能用版本 0 代替
+    const baseVersion = base?.version
     const authBefore = state.view?.version ?? 0
     const finalVersion = snap?.version ?? authBefore
 
@@ -403,10 +409,12 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       return
     }
 
-    // 播放门控（§7 line291）：开启动画、非重复批次、展示基准==命令 expected_version、确有可推进版本、有事件。
+    // 播放门控（§7 line291）：开启动画、非重复批次、展示起点存在且其版本==命令 expected_version、
+    // 确有可推进版本、有事件。display=null（如断网刷新后重试）无匹配起点 → 直接展示最终快照，不播放。
     const duplicate = requestId != null && processedRequests.has(requestId)
     const canPlay =
-      state.animate && !!snap && gameId === state.gameId && !duplicate && baseVersion === expected && finalVersion > baseVersion && events.length > 0
+      state.animate && !!snap && gameId === state.gameId && !duplicate &&
+      base != null && baseVersion === expected && finalVersion > expected && events.length > 0
 
     if (canPlay) {
       playBatch(gameId, requestId as string, events, snap as GameView)
@@ -477,24 +485,32 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       state.busy = false
       return
     }
+    if (resyncInFlight) return // 同一局只允许一个 GET 在途，状态层防重复调用
+    resyncInFlight = true
+    const seq = ++resyncSeq
     const gen = generation
+    const startDisplayGen = displayGen
+    // 过期判定：已有更新的重同步、切换会话/新局、或期间采用了更新的快照（展示代次前移）。
+    const stale = () => seq !== resyncSeq || gen !== generation || gameId !== state.gameId || displayGen !== startDisplayGen
     try {
       const client = requireApi()
       const fresh = await client.getGame(gameId, token)
-      if (gen !== generation || gameId !== state.gameId) return // 已被新局接管，busy 由新局管理
+      if (stale()) return // 过期请求的成功不得回写
       adoptIfNewer(gameId, fresh)
       state.needsResync = false
-      state.busy = state.animating || state.pending !== null // 重同步取得权威快照，释放冲突锁
+      state.busy = state.animating || state.pending !== null // 取得权威快照，解除重同步锁
     } catch (e) {
-      if (gen !== generation || gameId !== state.gameId) return
+      if (stale()) return // 过期请求的失败/404 均不得改写状态（尤其不得重新上锁）
       if (e instanceof ApiError && e.status === 404) {
         invalidateSession() // 重同步发现本局已失效
         return
       }
-      // 重同步瞬时失败（网络/5xx）：不得解锁到未同步的旧快照，保持锁定并暴露“重试”重新拉取
+      // 网络/5xx：保留锁并允许重试，绝不解锁到未同步的旧快照
       state.needsResync = true
       state.busy = true
       state.notice = '重同步失败，请重试'
+    } finally {
+      if (seq === resyncSeq) resyncInFlight = false // 仅当前有效请求解除在途标志
     }
   }
 
