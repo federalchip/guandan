@@ -57,6 +57,14 @@ onMounted(() => store.recover())
   <div class="app">
     <header class="topbar">
       <h1>掼蛋 v1</h1>
+      <label class="anim-toggle">
+        <input
+          type="checkbox"
+          :checked="store.state.animate"
+          @change="store.setAnimate(($event.target as HTMLInputElement).checked)"
+        />
+        动画
+      </label>
     </header>
     <ActionBar
       :started="started"
@@ -95,10 +103,23 @@ onMounted(() => store.recover())
   margin: 0 auto;
   padding-bottom: 24px;
 }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
 .topbar h1 {
   font-size: 20px;
-  padding: 12px 16px;
   margin: 0;
+}
+.anim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
 }
 .notice {
   margin: 10px 16px;

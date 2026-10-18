@@ -703,3 +703,136 @@ describe('T9 评审修复：重试锁/重复提交/404/UUID', () => {
     expect(store.state.notice ?? '').not.toContain('网络异常')
   })
 })
+
+describe('T9 复审修复：恢复/重同步/陈旧响应/动画开关', () => {
+  it('test_recovery_transient_error_keeps_session_and_pending', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    const persisted: PendingCommand = {
+      game_id: 'g1',
+      command: { request_id: 'rP', expected_version: 0, action: { kind: 'PASS' } },
+    }
+    storage.setItem(PENDING_KEY, JSON.stringify(persisted))
+    fake.resp.get = () => Promise.reject(new Error('network down')) // 恢复 GET 瞬时失败
+    const store = createGameState({ api: fake.api, storage, newRequestId: () => `r${++idSeq}` })
+    await store.recover()
+    // 不得删除会话或 pending：网络恢复后仍能用原 request_id 确认
+    expect(storage.raw.has(SESSION_KEY)).toBe(true)
+    expect(store.state.gameId).toBe('g1')
+    expect(store.state.pending?.command.request_id).toBe('rP')
+    expect(store.state.awaitingRetry).toBe(true)
+    expect(store.state.busy).toBe(false)
+    // 网络恢复后原样重试
+    fake.resp.submit = async (cmd) => ack(cmd, 1)
+    await store.retryPendingCommand()
+    expect(fake.calls.submit.length).toBe(1)
+    expect(fake.calls.submit[0].request_id).toBe('rP')
+    expect(store.state.pending).toBeNull()
+  })
+
+  it('test_recovery_404_invalidates_session', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    fake.resp.get = () => Promise.reject(new ApiError(404, 'GAME_NOT_FOUND', 'gone'))
+    const store = createGameState({ api: fake.api, storage, newRequestId: () => `r${++idSeq}` })
+    await store.recover()
+    expect(storage.raw.has(SESSION_KEY)).toBe(false)
+    expect(store.state.gameId).toBeNull()
+    expect(store.state.notice).toBe('本局已失效，请重新开始')
+  })
+
+  it('test_version_conflict_locks_until_resync', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '版本冲突'))
+    const resyncD = deferred<GameView>()
+    fake.resp.get = () => resyncD.promise // 重同步 GET 在途
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p = store.playSelection()
+    await flush()
+    await p
+    // 重同步在途：必须仍锁定，禁止基于旧快照再出牌
+    expect(store.state.busy).toBe(true)
+    const resolvesBefore = fake.calls.resolve.length
+    await store.playSelection()
+    expect(fake.calls.resolve.length).toBe(resolvesBefore) // 被 busy 拦下
+    // 重同步返回权威快照 → 解锁并采用
+    resyncD.resolve(viewOf('g1', 5))
+    await flush()
+    expect(store.state.view?.version).toBe(5)
+    expect(store.state.busy).toBe(false)
+  })
+
+  it('test_resync_404_invalidates_session', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    storage.setItem(SESSION_KEY, JSON.stringify({ game_id: 'g1', token: 't1' }))
+    fake.resp.resolve = async () => single('K1', [4])
+    fake.resp.submit = () => Promise.reject(new ApiError(409, 'VERSION_CONFLICT', '版本冲突'))
+    fake.resp.get = () => Promise.reject(new ApiError(404, 'GAME_NOT_FOUND', 'gone'))
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    await store.playSelection()
+    await flush()
+    expect(store.state.gameId).toBeNull()
+    expect(storage.raw.has(SESSION_KEY)).toBe(false)
+    expect(store.state.notice).toBe('本局已失效，请重新开始')
+    expect(store.state.busy).toBe(false)
+  })
+
+  it('test_stale_response_does_not_clear_new_selection', async () => {
+    const fake = makeFake()
+    const storage = memStorage()
+    fake.resp.resolve = async () => single('K1', [4])
+    const d = deferred<CommandResponse>()
+    fake.resp.submit = () => d.promise
+    const store = activeStore(fake.api, storage)
+    store.toggleSelected(4)
+    const p = store.playSelection() // 提交在途 expected v0
+    await flush()
+    store.applySnapshot('g1', viewOf('g1', 8)) // 较新快照已采用
+    store.resetSelection()
+    store.toggleSelected(20) // 用户基于新快照重新选牌
+    store.toggleSelected(21)
+    d.resolve(ack(fake.calls.submit[0], 4)) // 陈旧响应 final v4 < 8
+    await flush()
+    await p
+    expect(store.state.view?.version).toBe(8) // 不倒退
+    expect(store.state.selected.has(20)).toBe(true) // 新选牌未被陈旧响应清掉
+    expect(store.state.selected.has(21)).toBe(true)
+    expect(store.state.busy).toBe(false) // 陈旧响应确认后释放锁
+  })
+
+  it('test_animate_toggle_disables_playback', async () => {
+    const fx = animFixture(0) // 构造时 animate:true
+    fx.store.setAnimate(false) // 运行时关闭动画
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 2, [ev(1, 1), ev(2, 2)])
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection()
+    expect(fx.played.length).toBe(0) // 关闭后不逐事件播放
+    expect(fx.store.state.display?.version).toBe(2) // 直接采用最终快照
+  })
+
+  it('test_playback_projects_progressive_display', async () => {
+    const fx = animFixture(0)
+    fx.fake.resp.resolve = async () => single('K1', [4])
+    const events: EventView[] = [
+      { seq: 1, state_version: 1, event_type: 'PLAYED', actor_id: 1, payload: { kind: 'SINGLE', length: 1, remaining: 26, cards: [60] } as never },
+      { seq: 2, state_version: 2, event_type: 'PASSED', actor_id: 2, payload: {} as never },
+    ]
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 2, events)
+    fx.store.toggleSelected(4)
+    await fx.store.playSelection()
+    fx.step() // 播放座位1出牌
+    expect(fx.store.state.display?.remaining_counts?.[1]).toBe(26) // 余牌递减
+    expect(fx.store.state.display?.trick?.owner_id).toBe(1) // 桌面易主
+    expect(fx.store.state.display?.current_player).toBe(2) // 回合推进
+    fx.drain()
+    expect(fx.store.state.display?.version).toBe(2) // 收敛到最终快照
+  })
+})

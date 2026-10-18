@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { components } from '../api/schema'
+import { describeMove } from '../state/eventLabel'
 import Card from './Card.vue'
 
 type GameView = components['schemas']['GameView']
@@ -12,6 +13,9 @@ const SEAT_LABEL = ['你（座位 0）', '下家（座位 1）', '对家（座�
 const remaining = computed(() => props.view.remaining_counts ?? [])
 const finishOrder = computed(() => props.view.finish_order ?? [])
 const trickCards = computed(() => props.view.trick?.cards ?? [])
+const trickLabel = computed(() => describeMove(props.view.trick?.move))
+// 播放中间步骤对手牌面未知：以牌背呈现张数，真牌面在收敛快照显示。
+const backCount = computed(() => Math.max(0, (props.view.trick?.move?.length ?? 0) - trickCards.value.length))
 
 function placeOf(seat: number): number {
   const i = finishOrder.value.indexOf(seat)
@@ -37,8 +41,10 @@ function placeOf(seat: number): number {
     <div class="trick">
       <template v-if="view.trick">
         <span class="trick-owner">桌面 · 出牌者座位 {{ view.trick.owner_id }}</span>
+        <span v-if="trickLabel" class="trick-move">{{ trickLabel }}</span>
         <div class="trick-cards">
           <Card v-for="c in trickCards" :key="c.card_id" :card="c" />
+          <div v-for="n in backCount" :key="`back-${n}`" class="card-back" />
         </div>
       </template>
       <span v-else class="trick-empty">等待领出</span>
@@ -87,9 +93,21 @@ function placeOf(seat: number): number {
   display: flex;
   gap: 4px;
 }
+.card-back {
+  width: 52px;
+  height: 74px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: repeating-linear-gradient(45deg, #1e293b, #1e293b 6px, #273449 6px, #273449 12px);
+}
 .trick-owner,
+.trick-move,
 .trick-empty {
   font-size: 13px;
   opacity: 0.85;
+}
+.trick-move {
+  font-weight: 700;
+  color: #f59e0b;
 }
 </style>

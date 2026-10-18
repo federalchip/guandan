@@ -2,6 +2,7 @@ import { reactive } from 'vue'
 import type { components } from '../api/schema'
 import type { GameApi } from '../api/game'
 import { ApiError } from '../api/game'
+import { projectEvent } from './playback'
 
 type GameView = components['schemas']['GameView']
 type MoveView = components['schemas']['MoveView']
@@ -52,11 +53,13 @@ export interface GameStore {
     hintIndex: number
     canPass: boolean
     animating: boolean
+    animate: boolean // 动画开关：关闭时命令响应直接采用最终快照，不逐事件播放
     awaitingRetry: boolean // 结果不明（5xx/网络）且 pending 仍在，向用户暴露“重试”
     notice: string | null
   }
   toggleSelected(cardId: number): void
   resetSelection(): void
+  setAnimate(animate: boolean): void
   applySnapshot(gameId: string, view: GameView): boolean
   setSession(gameId: string, token: string): void
   clearGame(): void
@@ -101,7 +104,6 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   const storage = options.storage ?? defaultStorage()
   const api = options.api
   const newRequestId = options.newRequestId ?? generateRequestId
-  const animate = options.animate ?? false
   const scheduleStep = options.scheduleStep ?? ((fn: () => void) => void setTimeout(fn, ANIMATION_STEP_MS))
   const onEvent = options.onEvent
 
@@ -118,6 +120,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     hintIndex: -1,
     canPass: false,
     animating: false,
+    animate: options.animate ?? false,
     awaitingRetry: false,
     notice: null as string | null,
   })
@@ -154,6 +157,10 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
 
   function resetSelection(): void {
     state.selected.clear()
+  }
+
+  function setAnimate(animate: boolean): void {
+    state.animate = animate
   }
 
   function isHumanTurn(view: GameView | null): boolean {
@@ -331,10 +338,20 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       }
     } catch (e) {
       if (gen !== generation) return
-      storage.removeItem(SESSION_KEY)
-      clearGame()
+      if (e instanceof ApiError && e.status === 404) {
+        invalidateSession() // 本局确已失效：清会话+pending
+        return
+      }
+      // 瞬时错误（网络/5xx）：不得删除会话或 pending，保留原 request_id 供网络恢复后确认。
+      setSession(gameId, token) // 建立会话以便原样重试（GET 失败时尚未采用快照）
       state.busy = false
-      state.notice = e instanceof ApiError && e.status === 404 ? '本局已失效，请重新开始' : messageOf(e)
+      if (savedPending && savedPending.game_id === gameId) {
+        persistPending(savedPending)
+        state.awaitingRetry = true
+        state.notice = '恢复失败，结果不明，请重试'
+      } else {
+        state.notice = messageOf(e)
+      }
     }
   }
 
@@ -374,15 +391,24 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       state.canPass = snap.can_pass ?? false
     }
 
+    // finalVersion<=authBefore 说明更新的快照已先行采用（恢复/重同步），本响应属陈旧或重复：
+    // 按计划“旧响应只确认请求”，只确认 pending 并释放其持有的锁，绝不清选牌/不动展示。
+    if (!(finalVersion > authBefore)) {
+      if (requestId != null) processedRequests.add(requestId)
+      for (const e of events) if (e.seq != null) processedSeq.add(e.seq)
+      state.busy = state.animating || state.pending !== null
+      return
+    }
+
     // 播放门控（§7 line291）：开启动画、非重复批次、展示基准==命令 expected_version、确有可推进版本、有事件。
     const duplicate = requestId != null && processedRequests.has(requestId)
     const canPlay =
-      animate && !!snap && gameId === state.gameId && !duplicate && baseVersion === expected && finalVersion > baseVersion && events.length > 0
+      state.animate && !!snap && gameId === state.gameId && !duplicate && baseVersion === expected && finalVersion > baseVersion && events.length > 0
 
     if (canPlay) {
       playBatch(gameId, requestId as string, events, snap as GameView)
     } else {
-      // 不播放（关闭动画/重复/基准不匹配/被更新快照覆盖）：标记已处理并直接采用最终快照。
+      // 不播放（关闭动画/重复/基准不匹配）：标记已处理并直接采用最终快照。
       if (requestId != null) processedRequests.add(requestId)
       for (const e of events) if (e.seq != null) processedSeq.add(e.seq)
       directAdopt()
@@ -421,6 +447,14 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
       if (i < queue.length) {
         const e = queue[i++]
         if (e.seq != null) processedSeq.add(e.seq)
+        // 渐进投影：把这一事件的权威字段投到展示态，牌桌随余牌/回合/桌面/手牌逐步推进
+        const upcoming = queue[i]
+        const nextCurrent = upcoming
+          ? typeof upcoming.actor_id === 'number'
+            ? upcoming.actor_id
+            : undefined
+          : finalSnapshot.current_player
+        state.display = projectEvent(state.display ?? finalSnapshot, e, nextCurrent)
         onEvent?.(e)
         scheduleStep(step)
       } else {
@@ -435,15 +469,24 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   async function resync(): Promise<void> {
     const gameId = state.gameId
     const token = state.token
-    if (!gameId || !token) return
+    if (!gameId || !token) {
+      state.busy = false
+      return
+    }
     const gen = generation
     try {
       const client = requireApi()
       const fresh = await client.getGame(gameId, token)
-      if (gen !== generation || gameId !== state.gameId) return
+      if (gen !== generation || gameId !== state.gameId) return // 已被新局接管，busy 由新局管理
       adoptIfNewer(gameId, fresh)
-    } catch {
-      /* 重新同步失败不额外改写提示，保留原业务拒绝信息 */
+      state.busy = state.animating || state.pending !== null // 重同步取得权威快照，释放冲突锁
+    } catch (e) {
+      if (gen !== generation || gameId !== state.gameId) return
+      if (e instanceof ApiError && e.status === 404) {
+        invalidateSession() // 重同步发现本局已失效
+        return
+      }
+      state.busy = false // 其它错误：解锁但保留原业务拒绝提示
     }
   }
 
@@ -462,11 +505,16 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
         state.notice = '结果不明，请重试或刷新恢复'
         return
       }
-      // 4xx 业务拒绝：清除本命令 pending、解锁，保留可修正选牌
+      // 4xx 业务拒绝：清除本命令 pending、保留可修正选牌
       confirmPending(gameId, command.request_id)
-      state.busy = false
       state.notice = messageOf(e)
-      if (e.code === 'VERSION_CONFLICT' || e.code === 'NOT_YOUR_TURN') void resync()
+      if (e.code === 'VERSION_CONFLICT' || e.code === 'NOT_YOUR_TURN') {
+        // 版本冲突/未到回合：保持锁定直到重同步取回权威快照，杜绝基于旧快照再次出牌
+        state.busy = true
+        void resync() // resync 负责最终释放 busy
+        return
+      }
+      state.busy = false
       return
     }
     // 网络错误/超时 → 结果不明：保留 pending、锁定、允许重试（同样忽略已被并发确认的陈旧错误）。
@@ -628,6 +676,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     state,
     toggleSelected,
     resetSelection,
+    setAnimate,
     applySnapshot,
     setSession,
     clearGame,

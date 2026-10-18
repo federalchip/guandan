@@ -1,6 +1,7 @@
 import type { components } from '../api/schema'
 
 type EventView = components['schemas']['EventView']
+type MoveView = components['schemas']['MoveView']
 
 export const KIND_LABEL: Record<string, string> = {
   SINGLE: '单张',
@@ -57,4 +58,14 @@ export function describeEvent(event: EventView): string {
     default:
       return event.event_type ?? '事件'
   }
+}
+
+/** 把桌面上的一手牌（MoveView）渲染成“牌型 · 张数 · 主点”文本，供牌桌在播放/收敛时展示。 */
+export function describeMove(move: MoveView | undefined): string {
+  if (!move) return ''
+  const parts = [kindLabel(move.kind)]
+  if (typeof move.length === 'number') parts.push(`${move.length} 张`)
+  const r = rankLabel(move.main_rank)
+  if (r) parts.push(`主点 ${r}`)
+  return parts.join(' · ')
 }
