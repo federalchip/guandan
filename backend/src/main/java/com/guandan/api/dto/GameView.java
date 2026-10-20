@@ -20,5 +20,9 @@ public record GameView(String gameId,
                        int levelRank,
                        String phase,
                        ResultView result,
-                       long version) {
+                       long version,
+                       List<EventView> roundEvents) {
+    public GameView {
+        roundEvents = List.copyOf(roundEvents);
+    }
 }

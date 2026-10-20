@@ -1019,3 +1019,59 @@ describe('T9 复审第四轮：重同步防竞态 + 播放需匹配展示起点'
     expect(store.state.view?.version).toBe(9)
   })
 })
+
+describe('v1 四座位观察节奏', () => {
+  it('末位过牌后等待结轮时不继续高亮已过牌座位', async () => {
+    const fx = animFixture(0)
+    fx.store.applySnapshot('g1', viewOf('g1', 0, { can_pass: true }))
+    fx.fake.resp.submit = async (cmd) => respWith(cmd, 2, [
+      { seq: 1, state_version: 1, event_type: 'PASSED', actor_id: 0, payload: {} },
+      { seq: 2, state_version: 2, event_type: 'TRICK_CLOSED', payload: { next_leader: 3 } as never },
+    ])
+    await fx.store.passTurn()
+    fx.step()
+    expect(fx.store.state.table[0]?.passed).toBe(true)
+    expect(fx.store.state.display?.current_player).toBe(-1)
+    fx.step()
+    expect(fx.store.state.display?.current_player).toBe(3)
+  })
+
+  it('逐事件保留各家牌，使用可读停留时间，并从最终公开快照恢复', async () => {
+    const fake = makeFake()
+    fake.resp.resolve = async () => single('K1', [4])
+    const events: EventView[] = [
+      { seq: 1, state_version: 1, event_type: 'PLAYED', actor_id: 0,
+        payload: { cards: [4], played_cards: [{ card_id: 4, rank: 3, suit: 'S', deck_index: 0 }], kind: 'SINGLE', length: 1 } as never },
+      { seq: 2, state_version: 2, event_type: 'PLAYED', actor_id: 1,
+        payload: { cards: [8], played_cards: [{ card_id: 8, rank: 4, suit: 'S', deck_index: 0 }], kind: 'SINGLE', length: 1 } as never },
+      { seq: 3, state_version: 3, event_type: 'PASSED', actor_id: 2, payload: {} as never },
+    ]
+    fake.resp.submit = async (cmd) => {
+      const response = respWith(cmd, 3, events)
+      response.state!.round_events = events
+      return response
+    }
+    const scheduled: { fn: () => void; ms: number }[] = []
+    const store = createGameState({ api: fake.api, storage: memStorage(), animate: true,
+      newRequestId: () => `r${++idSeq}`, scheduleStep: (fn, ms) => void scheduled.push({ fn, ms }) })
+    store.setSession('g1', 't1')
+    store.applySnapshot('g1', viewOf('g1', 0))
+    store.toggleSelected(4)
+    await store.playSelection()
+    expect(scheduled[0]?.ms).toBe(0)
+    scheduled.shift()!.fn()
+    expect(store.state.table[0]?.cards[0]?.card_id).toBe(4)
+    expect(scheduled[0]?.ms).toBeGreaterThanOrEqual(1500)
+    scheduled.shift()!.fn()
+    expect(store.state.table[0]?.cards[0]?.card_id).toBe(4)
+    expect(store.state.table[1]?.cards[0]?.card_id).toBe(8)
+    scheduled.shift()!.fn()
+    expect(store.state.table[2]?.passed).toBe(true)
+    expect(scheduled[0]?.ms).toBeGreaterThanOrEqual(1000)
+    scheduled.shift()!.fn()
+    expect(store.state.table[0]?.cards[0]?.card_id).toBe(4)
+    expect(store.state.table[1]?.cards[0]?.card_id).toBe(8)
+    store.applySnapshot('g1', viewOf('g1', 3, { round_events: events }))
+    expect(store.state.table[2]?.passed).toBe(true)
+  })
+})

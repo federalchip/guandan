@@ -28,6 +28,27 @@ describe('动画开关（页面提供可用的关闭入口）', () => {
   })
 })
 
+describe('四边牌桌与操作区', () => {
+  it('恢复牌局后在桌面中央提供操作，并显示本轮各家的公开牌', async () => {
+    sessionStorage.setItem('guandan.session', JSON.stringify({ game_id: 'g1', token: 't1' }))
+    const snapshot = {
+      game_id: 'g1', version: 3, phase: 'IN_PROGRESS', current_player: 0,
+      remaining_counts: [27, 26, 26, 27], finish_order: [], own_hand: [], can_pass: true,
+      round_events: [
+        { seq: 1, actor_id: 1, event_type: 'PLAYED', payload: { cards: [8], played_cards: [{ card_id: 8, rank: 4, suit: 'S' }], kind: 'SINGLE', length: 1 } },
+        { seq: 2, actor_id: 2, event_type: 'PASSED', payload: {} },
+      ],
+      trick: { owner_id: 1, move: { kind: 'SINGLE', length: 1 }, cards: [{ card_id: 8, rank: 4, suit: 'S' }] },
+    }
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(jsonResp(snapshot))))
+    const w = mount(App)
+    await flushPromises()
+    expect(w.find('.table .center .action-bar').exists()).toBe(true)
+    expect(w.find('[data-seat="1"] [data-card-id="8"]').exists()).toBe(true)
+    expect(w.find('[data-seat="2"] .pass-marker').text()).toBe('不出')
+  })
+})
+
 describe('断网恢复后仍有可用的重试入口', () => {
   it('test_recovery_transient_error_exposes_retry_when_not_started', async () => {
     sessionStorage.setItem('guandan.session', JSON.stringify({ game_id: 'g1', token: 't1' }))

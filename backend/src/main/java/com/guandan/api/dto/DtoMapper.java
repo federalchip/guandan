@@ -1,7 +1,9 @@
 package com.guandan.api.dto;
 
+import com.guandan.domain.Deck;
 import com.guandan.domain.model.Card;
 import com.guandan.domain.model.DomainEvent;
+import com.guandan.domain.model.EventType;
 import com.guandan.domain.model.GameResult;
 import com.guandan.domain.model.Move;
 import com.guandan.domain.model.PlayerView;
@@ -9,13 +11,17 @@ import com.guandan.domain.model.PublicTrick;
 import com.guandan.domain.model.WildBinding;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 领域模型 → 传输 DTO 的白名单映射。只映射公开字段，enum 转字符串、List 转数组；
  * payload 直接透传（引擎已保证仅含公开信息）。不暴露 GameState 内部或种子。
  */
 public final class DtoMapper {
+
+    private static final List<Card> CARDS_BY_ID = Deck.buildDeck();
 
     private DtoMapper() {
     }
@@ -62,6 +68,10 @@ public final class DtoMapper {
     }
 
     public static GameView toGameView(String gameId, PlayerView v) {
+        return toGameView(gameId, v, List.of());
+    }
+
+    public static GameView toGameView(String gameId, PlayerView v, List<EventView> roundEvents) {
         List<CardView> ownHand = new ArrayList<>(v.ownHand().size());
         for (Card c : v.ownHand()) {
             ownHand.add(toCardView(c));
@@ -78,10 +88,19 @@ public final class DtoMapper {
                 v.levelRank(),
                 v.phase().name(),
                 v.result() == null ? null : toResultView(v.result()),
-                v.version());
+                v.version(), List.copyOf(roundEvents));
     }
 
     public static EventView toEventView(long seq, long stateVersion, DomainEvent e) {
-        return new EventView(seq, stateVersion, e.eventType().name(), e.actorId(), e.payload());
+        if (e.eventType() != EventType.PLAYED) {
+            return new EventView(seq, stateVersion, e.eventType().name(), e.actorId(), e.payload());
+        }
+        Map<String, Object> payload = new LinkedHashMap<>(e.payload());
+        List<CardView> playedCards = new ArrayList<>();
+        for (Object id : (List<?>) e.payload().get("cards")) {
+            playedCards.add(toCardView(CARDS_BY_ID.get((Integer) id)));
+        }
+        payload.put("played_cards", List.copyOf(playedCards));
+        return new EventView(seq, stateVersion, e.eventType().name(), e.actorId(), Map.copyOf(payload));
     }
 }

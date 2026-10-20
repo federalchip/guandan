@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
@@ -72,7 +73,8 @@ public class GameService {
         GameRecord rec = authorize(gameId, sessionToken);
         rec.lock.lock();
         try {
-            return DtoMapper.toGameView(rec.gameId, PlayerViewFactory.getPlayerView(rec.state, HUMAN_SEAT));
+            return DtoMapper.toGameView(rec.gameId, PlayerViewFactory.getPlayerView(rec.state, HUMAN_SEAT),
+                    currentRoundEvents(rec.events));
         } finally {
             rec.lock.unlock();
         }
@@ -165,7 +167,7 @@ public class GameService {
             rec.events.addAll(newEvents);
             rec.nextSeq = seq;
             GameView finalView = DtoMapper.toGameView(rec.gameId,
-                    PlayerViewFactory.getPlayerView(work, HUMAN_SEAT));
+                    PlayerViewFactory.getPlayerView(work, HUMAN_SEAT), currentRoundEvents(rec.events));
             List<EventView> eventViews = new ArrayList<>(newEvents.size());
             for (SequencedEvent se : newEvents) {
                 eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
@@ -187,6 +189,18 @@ public class GameService {
             sink.add(new SequencedEvent(seq++, stateVersion, e));
         }
         return seq;
+    }
+
+    /** 最近一次 TRICK_CLOSED 后的公开事件，供刷新恢复本轮各座位的展示。 */
+    private static List<EventView> currentRoundEvents(List<SequencedEvent> events) {
+        List<EventView> reversed = new ArrayList<>();
+        for (int i = events.size() - 1; i >= 0; i--) {
+            SequencedEvent se = events.get(i);
+            if (se.event().eventType() == com.guandan.domain.model.EventType.TRICK_CLOSED) break;
+            reversed.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
+        }
+        Collections.reverse(reversed);
+        return List.copyOf(reversed);
     }
 
     private static Action toAction(ActionRequest ar) {

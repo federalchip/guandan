@@ -67,6 +67,7 @@ onMounted(() => store.recover())
       </label>
     </header>
     <ActionBar
+      v-if="!view"
       :started="started"
       :finished="finished"
       :can-act="canAct"
@@ -89,7 +90,24 @@ onMounted(() => store.recover())
       @cancel="store.dismissDeclaration"
     />
     <template v-if="view">
-      <Table :view="view" />
+      <Table :view="view" :seat-actions="store.state.table">
+        <template #actions>
+          <ActionBar
+            :started="started"
+            :finished="finished"
+            :can-act="canAct"
+            :can-pass="canPass"
+            :can-retry="canRetry"
+            :selected-count="selectedCount"
+            @start="store.createGame"
+            @restart="store.createGame"
+            @play="store.playSelection"
+            @pass="store.passTurn"
+            @hint="store.cycleHint"
+            @retry="store.retryPendingCommand"
+          />
+        </template>
+      </Table>
       <Hand :cards="ownHand" :selected="store.state.selected" @select="store.toggleSelected" />
       <ResultPanel v-if="finished && result" :result="result" />
     </template>

@@ -119,6 +119,18 @@ export interface components {
             session_token?: string;
             state?: components["schemas"]["GameView"];
         };
+        EventView: {
+            /** Format: int64 */
+            seq?: number;
+            /** Format: int64 */
+            state_version?: number;
+            event_type?: string;
+            /** Format: int32 */
+            actor_id?: number;
+            payload?: {
+                [key: string]: Record<string, never>;
+            };
+        };
         GameView: {
             game_id?: string;
             own_hand?: components["schemas"]["CardView"][];
@@ -136,6 +148,7 @@ export interface components {
             result?: components["schemas"]["ResultView"];
             /** Format: int64 */
             version?: number;
+            round_events?: components["schemas"]["EventView"][];
         };
         MoveView: {
             card_ids?: number[];
@@ -193,18 +206,6 @@ export interface components {
             accepted_version?: number;
             state?: components["schemas"]["GameView"];
             events?: components["schemas"]["EventView"][];
-        };
-        EventView: {
-            /** Format: int64 */
-            seq?: number;
-            /** Format: int64 */
-            state_version?: number;
-            event_type?: string;
-            /** Format: int32 */
-            actor_id?: number;
-            payload?: {
-                [key: string]: Record<string, never>;
-            };
         };
         HealthResponse: {
             status?: string;

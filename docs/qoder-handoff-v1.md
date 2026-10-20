@@ -7,7 +7,8 @@
 - `backend/pom.xml`：Spring MVC、Validation、JUnit/MockMvc、QuickTheories；Maven Wrapper 3.3.4/Maven 3.9.11；`slow`/`performance` 标签配置；JDK 17 编译目标。
 - `GuandanApplication`：Spring Boot 启动入口；`application.yml`：端口 8000。
 - `HealthController` 和 `HealthControllerTest`：无会话的 `/api/v1/health`，已用真实 JAR 启动核对。
-- A–F 已交付：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）、T4c 固定复杂手牌基准、纯牌局状态机 `GameEngine`（回合/接风/结算，消费 `turn_cases.json`）+ `PlayerViewFactory`（隐藏信息过滤）、随机合法机器人 `RandomLegalPolicy`/`BotSeeds` + `M2SmokeTest` 20 局耗时基线、内存服务 `GameService`/`InMemoryGameStore`（每局锁/幂等/批次回滚/512 步保护）+ `GameController`/DTO/`ApiExceptionHandler`（会话令牌、错误码→状态映射，见 `docs/api-v1.md`）及对应测试。G 包中的 T8 牌桌、实体选牌、可见状态与刷新恢复已交付并验收；T8 恢复竞态的修复与复验见 [工单](t8-recovery-race-ticket.md)。T9–T11 尚未验收，MVP 尚未完成。
+- A–F（T1–T7）已交付并验收：`docs/rules-v1.md` 与两份人工 fixture、`Deck` 和领域模型、`MoveClassifier`/`MoveComparator`、测试专用独立参照 `SmallHandOracle`、生产 `LegalMoveGenerator`（与参照双向语义集合对照、共用 `CardIdValidator` 统一越界/重复错误码）、T4c 固定复杂手牌基准、纯牌局状态机 `GameEngine`（回合/接风/结算，消费 `turn_cases.json`）+ `PlayerViewFactory`（隐藏信息过滤）、随机合法机器人 `RandomLegalPolicy`/`BotSeeds` + `M2SmokeTest` 20 局耗时基线、内存服务 `GameService`/`InMemoryGameStore`（每局锁/幂等/批次回滚/512 步保护）+ `GameController`/DTO/`ApiExceptionHandler`（会话令牌、错误码→状态映射，见 `docs/api-v1.md`）及对应测试。
+- G 包中的 T8 已验收：Vue 牌桌、实体选牌、可见状态和刷新恢复；恢复竞态的修复与复验见 [工单](t8-recovery-race-ticket.md)。T9 已于 2026-10-18 通过阶段门：声明选择、提示、出牌/过牌、按 `{game_id, command}` 保存和原样重试 pending、跨局与版本保护、事件去重/播放及无展示起点时直接采用最终快照均已实现。T10 于 2026-10-20 通过自动对局、复现与性能阶段门；T11 于 2026-10-20 通过真实浏览器与交付验收，本地单局 v1 MVP 完成。结果见 [测试报告](test-report-v1.md)。
 - 回合 fixture 的守恒口径为“四家手牌 + `discarded` = 108 个不同 CardId”；当前 `trick` 牌属于 `discarded`，不额外计数。短手牌场景由测试按四家手牌在整副牌中的补集构造 `discarded`。
 
 ## 交付顺序和可分配任务
@@ -22,7 +23,7 @@
 | F：T5–T7 牌局、机器人、API | 在 E 后分阶段交付 | 状态机/接风/结算→合法随机机器人及 M2 20 局耗时→内存服务、DTO、幂等和 HTTP；每阶段依主计划单独验收 | 每个动作检查四家手牌与 `discarded` 合计 108 个不同 ID，且 `trick` 牌属于 `discarded`；M2 输出整局耗时；服务端同 request_id 不重复扣牌、批次失败回滚、对手手牌不可见 |
 | G：T8–T11 页面与完整验收 | API 合同稳定后交付 | Vue 牌桌、声明选择、按 `{game_id, command}` 恢复、浏览器 E2E、T10 模拟与性能 | 页面“开始一局”“再来一局”；T10 做完整性能验收，T11 做浏览器与交付验收 |
 
-A–F 与 G 包中的 T8 已交付并验收；下一步是 T9（声明选择、提示、重试与事件播放），之后才进行 T10 性能和 T11 浏览器验收。G 不宜与后端同时改规则合同或共享类；若多人并行，只并行各自拥有的文件，接口变更先写入主计划和 fixture。项目已建立本地 Git 仓库；提交与推送分别记录，不能用提交成功代替测试验收。
+A–F 与 G 包中的 T8–T11 已交付并通过阶段验收。后续联机/上线工作另见 [单人在线版计划](online-solo-launch-plan.md)。接口变更先写入主计划和 fixture；提交与推送分别记录，不能用提交成功代替测试验收。
 
 ## 每包统一实践
 
@@ -39,6 +40,6 @@ A–F 与 G 包中的 T8 已交付并验收；下一步是 T9（声明选择、�
 - HTTP 统一 `/api/v1`，创建局与健康检查之外使用会话令牌；只返回白名单公开 DTO。浏览器保存 `{game_id, command}`，网络结果不明时原样重试。
 - 不新增升级、贡还、跨局状态、数据库、多人联机或 Python 后端。性能基准 T4 先建立，M2 测整局耗时，T10 才做完整验收。
 
-## 可直接交给 Qoder 的下一批指令
+## T11 交接指令（已完成，供追溯）
 
-> 请在 `E:\professional_class\guandan` 中从 F 的 T5（纯牌局状态机、接风与结果）开始，先通读 `2026-10-06-guandan-v1-mvp.md` 的 T5 合同、`docs/rules-v1.md` 和 `backend/src/test/resources/fixtures/turn_cases.json`。使用已交付的 A–E 代码与人工预期，先完成 T5 的状态转移、结算、隐藏信息测试及单独验收；随后按主计划依次交付并验收 T6 机器人与 M2 初测、T7 会话和 HTTP 接口。暂不开始 G 的前端任务。每个合法步骤按“四家手牌 + discarded = 108 个不同 CardId、trick ⊆ discarded”检查守恒；非法动作保持状态与 version 不变。各任务交付时列出变更文件、实际测试命令与结果、未解决问题和下一任务依赖。
+> 请在 `E:\professional_class\guandan` 中从主计划 T11 开始，先阅读 [T10 测试报告](test-report-v1.md)及 T11 合同。使用真实后端和浏览器完成整局、短手牌结算、刷新恢复、响应丢失重试、跨局隔离及事件播放 E2E；测试 fixture 只由测试进程注入，不新增生产调牌接口。运行 Playwright、全部后端测试以及前端单测、类型检查和构建，记录环境、命令、结果、失败修复与已知限制。T11 通过前不要将整个 v1 MVP 标为完成。

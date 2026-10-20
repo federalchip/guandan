@@ -33,14 +33,18 @@ describe('事件渐进投影（把权威 payload 投到展示态，牌桌逐步�
       event_type: 'PLAYED',
       actor_id: 1,
       state_version: 4,
-      payload: { kind: 'PAIR', length: 2, main_rank: 9, remaining: 10, cards: [60, 61] } as never,
+      payload: { kind: 'PAIR', length: 2, main_rank: 9, remaining: 10, cards: [60, 61],
+        played_cards: [
+          { card_id: 60, deck_index: 1, rank: 3, suit: 'S' },
+          { card_id: 61, deck_index: 1, rank: 3, suit: 'H' },
+        ] } as never,
     })
     const next = projectEvent(base(), e, 2)
     expect(next.remaining_counts?.[1]).toBe(10) // 该家余牌递减
     expect(next.trick?.owner_id).toBe(1) // 桌面易主到出牌者
     expect(next.trick?.move?.kind).toBe('PAIR')
     expect(next.trick?.move?.length).toBe(2)
-    expect(next.trick?.cards ?? []).toEqual([]) // 对手牌面不在事件里 → 收敛快照再显示
+    expect(next.trick?.cards?.map((c) => c.card_id)).toEqual([60, 61]) // 对手公开牌面随事件显示
     expect(next.current_player).toBe(2) // 回合推进到下一动作座位
     expect(next.version).toBe(4) // 展示版本跟随事件
     expect(next.own_hand?.length).toBe(2) // 自己手牌不变

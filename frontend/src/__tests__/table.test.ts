@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import Table from '../components/Table.vue'
+import { emptyTable } from '../state/tablePresentation'
 import type { components } from '../api/schema'
 
 type GameView = components['schemas']['GameView']
@@ -20,6 +21,22 @@ function view(trick: GameView['trick'], extra: Partial<GameView> = {}): GameView
 }
 
 describe('牌桌渲染渐进投影态', () => {
+  it('四个座位分占上下左右，各家公开牌和过牌提示留在所属座位', () => {
+    const actions = emptyTable()
+    actions[0] = { cards: [{ card_id: 4, rank: 3, suit: 'S' }], move: { kind: 'SINGLE', length: 1 }, passed: false }
+    actions[1] = { cards: [{ card_id: 8, rank: 4, suit: 'S' }], move: { kind: 'SINGLE', length: 1 }, passed: false }
+    actions[2] = { cards: [], move: null, passed: true }
+    const w = mount(Table, { props: { view: view({ owner_id: 1, move: { kind: 'SINGLE', length: 1 }, cards: [] }), seatActions: actions } })
+    for (const seat of [0, 1, 2, 3]) expect(w.find(`[data-seat="${seat}"]`).exists()).toBe(true)
+    expect(w.find('[data-seat="0"]').classes()).toContain('seat-bottom')
+    expect(w.find('[data-seat="1"]').classes()).toContain('seat-left')
+    expect(w.find('[data-seat="2"]').classes()).toContain('seat-top')
+    expect(w.find('[data-seat="3"]').classes()).toContain('seat-right')
+    expect(w.find('[data-seat="0"] [data-card-id="4"]').exists()).toBe(true)
+    expect(w.find('[data-seat="1"] [data-card-id="8"]').exists()).toBe(true)
+    expect(w.find('[data-seat="2"] .pass-marker').text()).toBe('不出')
+  })
+
   it('test_renders_trick_label_and_backs_for_hidden_faces', () => {
     const w = mount(Table, {
       props: { view: view({ owner_id: 1, move: { kind: 'PAIR', length: 2, main_rank: 9 }, cards: [] }) },

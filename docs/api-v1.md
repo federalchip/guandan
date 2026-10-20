@@ -69,11 +69,12 @@
 ### EventView
 ```json
 {"seq": 1, "state_version": 1, "event_type": "PLAYED", "actor_id": 0,
- "payload": {"cards": [4], "kind": "SINGLE", "main_rank": 3, "length": 1,
+ "payload": {"cards": [4], "played_cards": [{"card_id": 4, "deck_index": 0, "rank": 3, "suit": "S"}],
+             "kind": "SINGLE", "main_rank": 3, "length": 1,
              "interpretation_key": "gd-v1-level2|SINGLE|1|3|4", "wild_bindings": [], "remaining": 26}}
 ```
 `event_type ∈ {PLAYED, PASSED, TRICK_CLOSED, PLAYER_FINISHED, GAME_FINISHED}`；`seq` 由服务层递增分配，
-`state_version` 为该事件发生后的状态版本。payload 只含公开信息（PLAYED 为本次 cards/声明/行为者剩余张数）。
+`state_version` 为该事件发生后的状态版本。payload 只含公开信息：`PLAYED.cards` 保留实体 ID，`played_cards` 按同一顺序补充这些**已出牌**的自然牌面，`wild_bindings` 单独说明百搭声明，不会改写自然牌面；另含声明和行为者剩余张数。`GameView.round_events` 为最近一次 `TRICK_CLOSED` 之后的公开事件，供刷新后重建本轮各座位出牌/过牌展示；新局或本轮刚结束时为空。它不包含任何未出牌的对手手牌。
 
 ## 端点示例
 

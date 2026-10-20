@@ -1,0 +1,85 @@
+import { expect, test } from '@playwright/test'
+import { currentSession, disableAnimation, openFixture, snapshot } from './support'
+
+test('真实整局起手：27 张、提示、出牌、机器人批次、回到真人', async ({ page }) => {
+  await page.goto('/')
+  await disableAnimation(page)
+  const create = page.waitForResponse((response) => response.url().endsWith('/api/v1/games') && response.request().method() === 'POST')
+  await page.getByRole('button', { name: '开始一局' }).click()
+  expect((await create).status()).toBe(201)
+  await expect(page.getByText('单局 · 两副牌 108 张 · 固定打 2')).toBeVisible()
+  await expect(page.locator('.hand .card')).toHaveCount(27)
+  await page.screenshot({ path: 'test-results/t11-table-desktop.png', fullPage: true })
+  const session = await currentSession(page)
+  const before = await snapshot(page, session)
+  expect((before.own_hand as unknown[]).length).toBe(27)
+
+  await page.getByRole('button', { name: '提示' }).click()
+  await expect(page.locator('.hand .card.selected')).not.toHaveCount(0)
+  const actionResponse = page.waitForResponse((response) => response.url().endsWith('/actions') && response.request().method() === 'POST')
+  await page.getByRole('button', { name: '出牌' }).click()
+  const response = await actionResponse
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  expect(body.events.some((event: { actor_id: number }) => event.actor_id !== 0)).toBe(true)
+  await expect(page.getByRole('button', { name: '提示' })).toBeEnabled()
+  const after = await snapshot(page, session)
+  expect(after.version).toBe(body.state.version)
+  expect(after.current_player).toBe(0)
+  expect((after.own_hand as unknown[]).length).toBeLessThan(27)
+  await expect(page.locator('.hand .card')).toHaveCount((after.own_hand as unknown[]).length)
+  await expect(page.locator('[data-seat="0"]')).toHaveClass(/current/)
+})
+
+test('短手牌出完后机器人结算，再来一局得到新的 game_id', async ({ page }) => {
+  const fixture = await openFixture(page, 'e2e-short', 'e2e-short-token')
+  await disableAnimation(page)
+  await expect(page.locator('.hand .card')).toHaveCount(1)
+  await page.locator('.hand .card').click()
+  await page.getByRole('button', { name: '出牌' }).click()
+  await expect(page.getByRole('heading', { name: '本局结束' })).toBeVisible()
+  const finished = await snapshot(page, fixture)
+  expect(finished.phase).toBe('FINISHED')
+  expect((finished.own_hand as unknown[]).length).toBe(0)
+  await page.getByRole('button', { name: '再来一局' }).click()
+  await expect(page.locator('.hand .card')).toHaveCount(27)
+  expect((await currentSession(page)).game_id).not.toBe(fixture.game_id)
+})
+
+test('多声明需玩家选择，实体牌按所选声明提交', async ({ page }) => {
+  const fixture = await openFixture(page, 'e2e-declare', 'e2e-declare-token')
+  await disableAnimation(page)
+  await expect(page.locator('.hand .card')).toHaveCount(5)
+  for (const card of await page.locator('.hand .card').all()) await card.press('Enter')
+  await expect(page.locator('.hand .card.selected')).toHaveCount(5)
+  await page.getByRole('button', { name: '出牌' }).click()
+  const dialog = page.getByRole('dialog', { name: '选择声明' })
+  await expect(dialog.locator('.options button')).not.toHaveCount(0)
+  const key = await dialog.locator('.options button').first().getAttribute('data-key')
+  const action = page.waitForRequest((request) => request.url().endsWith('/actions') && request.method() === 'POST')
+  await dialog.locator('.options button').first().click()
+  expect((await action).postDataJSON().action.interpretation_key).toBe(key)
+  await expect(dialog).toBeHidden()
+  expect((await snapshot(page, fixture)).version).toBeGreaterThan(0)
+})
+
+test('跟牌局可以过牌，后端版本前进', async ({ page }) => {
+  const fixture = await openFixture(page, 'e2e-pass', 'e2e-pass-token')
+  await disableAnimation(page)
+  const before = await snapshot(page, fixture)
+  await expect(page.getByRole('button', { name: '过牌' })).toBeEnabled()
+  const action = page.waitForRequest((request) => request.url().endsWith('/actions') && request.method() === 'POST')
+  await page.getByRole('button', { name: '过牌' }).click()
+  expect((await action).postDataJSON().action.kind).toBe('PASS')
+  await expect.poll(async () => (await snapshot(page, fixture)).version as number).toBeGreaterThan(before.version as number)
+})
+
+test('竖排同点数手牌能依次用鼠标选择每张实体牌', async ({ page }) => {
+  await openFixture(page, 'e2e-hand', 'e2e-hand-token')
+  const cards = page.locator('.hand .rank-group .card')
+  await expect(cards).toHaveCount(3)
+  for (const card of await cards.all()) {
+    await card.click({ position: { x: 25, y: 12 }, timeout: 3000 })
+  }
+  await expect(page.locator('.hand .card.selected')).toHaveCount(3)
+})

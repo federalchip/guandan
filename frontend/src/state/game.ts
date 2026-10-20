@@ -3,6 +3,7 @@ import type { components } from '../api/schema'
 import type { GameApi } from '../api/game'
 import { ApiError } from '../api/game'
 import { projectEvent } from './playback'
+import { applyTableEvent, emptyTable, tableFromSnapshot, type TablePresentation } from './tablePresentation'
 
 type GameView = components['schemas']['GameView']
 type MoveView = components['schemas']['MoveView']
@@ -22,7 +23,7 @@ export interface GameStoreOptions {
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
   newRequestId?: () => string
   /** 动画步进调度；默认 setTimeout。测试注入手动队列以完全控制播放。 */
-  scheduleStep?: (fn: () => void) => void
+  scheduleStep?: (fn: () => void, delayMs: number) => void
   /** 关闭时收到响应直接采用最终快照，不逐事件播放。默认关闭。 */
   animate?: boolean
   /** 每播放一个事件的回调（驱动 UI 动画/音效）；关闭动画时不触发。 */
@@ -32,7 +33,15 @@ export interface GameStoreOptions {
 const SESSION_KEY = 'guandan.session'
 const PENDING_KEY = 'guandan.pending'
 const HUMAN_SEAT = 0
-const ANIMATION_STEP_MS = 350
+const PLAY_DWELL_MS = 2000
+const PASS_DWELL_MS = 1500
+const OTHER_DWELL_MS = 650
+
+function eventDwellMs(event: EventView): number {
+  if (event.event_type === 'PLAYED') return PLAY_DWELL_MS
+  if (event.event_type === 'PASSED') return PASS_DWELL_MS
+  return OTHER_DWELL_MS
+}
 
 /**
  * 前端会话控制器（单一真源）：拥有会话生命周期（创建/恢复）、权威快照与动画展示状态、
@@ -45,6 +54,7 @@ export interface GameStore {
     token: string | null
     view: GameView | null // 权威：最新已知服务端快照
     display: GameView | null // 展示：动画收敛目标，空闲时等于 view
+    table: TablePresentation // 每家本轮公开牌与过牌提示
     selected: Set<number>
     pending: PendingCommand | null
     busy: boolean // 解析/弹窗/提交/结果不明/恢复/播放期间为真，禁止另起出牌/过牌
@@ -105,7 +115,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   const storage = options.storage ?? defaultStorage()
   const api = options.api
   const newRequestId = options.newRequestId ?? generateRequestId
-  const scheduleStep = options.scheduleStep ?? ((fn: () => void) => void setTimeout(fn, ANIMATION_STEP_MS))
+  const scheduleStep = options.scheduleStep ?? ((fn: () => void, delayMs: number) => void setTimeout(fn, delayMs))
   const onEvent = options.onEvent
 
   const state = reactive({
@@ -113,6 +123,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     token: null as string | null,
     view: null as GameView | null,
     display: null as GameView | null,
+    table: emptyTable(),
     selected: new Set<number>(),
     pending: null as PendingCommand | null,
     busy: false,
@@ -166,6 +177,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
 
   function setAnimate(animate: boolean): void {
     state.animate = animate
+    if (!animate && state.animating) directAdopt()
   }
 
   function isHumanTurn(view: GameView | null): boolean {
@@ -178,6 +190,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     state.canPass = view.can_pass ?? false
     displayGen++
     state.display = view
+    state.table = tableFromSnapshot(view)
     state.animating = false
     if (state.needsResync) {
       // 权威快照已足以完成同步：解除重同步锁并清除过期的“重同步失败”提示
@@ -277,6 +290,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
     state.canPass = false
     state.busy = false
     state.animating = false
+    state.table = emptyTable()
     state.needsResync = false
     state.selected.clear()
     processedRequests.clear()
@@ -443,6 +457,7 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
   function directAdopt(): void {
     displayGen++
     state.display = state.view
+    state.table = state.view ? tableFromSnapshot(state.view) : emptyTable()
     state.animating = false
     state.busy = state.pending !== null
   }
@@ -469,18 +484,20 @@ export function createGameState(options: GameStoreOptions = {}): GameStore {
         const nextCurrent = upcoming
           ? typeof upcoming.actor_id === 'number'
             ? upcoming.actor_id
-            : undefined
+            : -1 // 无 actor 的结轮/结算事件前，不把刚行动的座位继续标为“行动中”
           : finalSnapshot.current_player
         state.display = projectEvent(state.display ?? finalSnapshot, e, nextCurrent)
+        state.table = applyTableEvent(state.table, e)
         onEvent?.(e)
-        scheduleStep(step)
+        scheduleStep(step, eventDwellMs(e))
       } else {
         state.display = finalSnapshot // 播放完直接应用最终快照
+        state.table = tableFromSnapshot(finalSnapshot)
         state.animating = false
         state.busy = state.pending !== null
       }
     }
-    scheduleStep(step)
+    scheduleStep(step, 0)
   }
 
   async function resync(): Promise<void> {

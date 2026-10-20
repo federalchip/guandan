@@ -114,6 +114,9 @@ class GameControllerTest {
                 .andExpect(jsonPath("$.events").isNotEmpty())
                 .andExpect(jsonPath("$.events[0].seq").isNumber())
                 .andExpect(jsonPath("$.events[0].state_version").isNumber())
+                .andExpect(jsonPath("$.events[0].payload.played_cards[0].card_id").value(cards.get(0)))
+                .andExpect(jsonPath("$.events[0].payload.played_cards[0].rank").isNumber())
+                .andExpect(jsonPath("$.events[0].payload.played_cards[0].suit").isString())
                 .andReturn().getResponse().getContentAsString();
 
         long finalVersion = om.readTree(cr).get("state").get("version").asLong();

@@ -49,7 +49,40 @@
 
 - `backend/`：`.\mvnw.cmd -q test`、`.\mvnw.cmd -q -Pslow test`、`.\mvnw.cmd -q -Pperformance test` 均退出 0；性能套件的 262 项测试为 0 失败、0 错误；`.\mvnw.cmd -q -DskipTests package` 退出 0。独立审查发现失败记录复现未验证记录内容，现已补充篡改回归并修复。
 - `backend/`：`java -jar target/guandan-v1.jar simulate --start-seed 0 --games 1000 --max-actions 512 --output artifacts/sim-1000.json` 与 10,000 局同参数批次均退出 0；`replay --input artifacts/sim-1000.json` 输出 verified 1000 games；`benchmark --output artifacts/t10-benchmark.json` 输出 true。
-- `frontend/`：`npm run test:unit -- --run` 为 85/85 通过；`npm run typecheck`、`npm run build` 均退出 0。真实浏览器流程留在 T11。
+- `frontend/`：`npm run test:unit -- --run` 为 85/85 通过；`npm run typecheck`、`npm run build` 均退出 0。T10 阶段尚未执行真实浏览器流程，验收结果见下方 T11 章节。
 - `git diff --check` 退出 0。原始模拟与性能 JSON 保存在 `backend/artifacts/`（未纳入 Git）；本报告记录可审阅的关键结果。
 
-本次工作没有可靠的人工开发人时计时记录，因此只列机器运行时间，不推算开发人时。后续依赖：T11 真实后端浏览器 E2E、刷新恢复/事件播放、端到端交付复验。
+本次工作没有可靠的人工开发人时计时记录，因此只列机器运行时间，不推算开发人时。T10 阶段遗留的真实后端浏览器 E2E、刷新恢复、事件播放和端到端交付复验，见下方 T11 章节。
+
+## T11：真实浏览器与交付验收（2026-10-20）
+
+**阶段结论：T11 验收通过，本地单局 v1 MVP 完成。** 本结论覆盖本机单 JVM、单人对 3 名机器人；在线部署、多用户并发和移动端适配属于后续计划。
+
+### 环境与方式
+
+- Windows 11；Amazon Corretto JDK 17.0.17；Node 24.19.0、npm 11.17.0；Playwright 1.64.1 驱动 Edge 155.0.4283.62。
+- Playwright 在 8001/5174 独立端口启动真实 Spring HTTP 与 Vite 页面，浏览器通过 `/api` 代理访问后端。固定局只由 `backend/src/test/java` 的 `e2e` profile 在测试进程启动时注入；已检查生产 JAR 不含 `E2eApplication` 和 `E2eFixtureConfiguration`。
+- 后端快照、动作响应、request_id、浏览器 `sessionStorage` 与可观察 DOM 联合断言。丢响应测试先让后端执行，再中断浏览器响应；重启测试实际终止并重启测试后端进程。事件播放用 Playwright 时钟推进，不用固定睡眠猜测结果。
+
+### 浏览器结果
+
+`frontend/` 执行 `npx playwright test`：**10/10 通过**。覆盖正常 27 张起手、提示和出牌后机器人批次与回到真人；短手牌出完后的结算与新局 ID；多声明选择和过牌；竖排同点数实体牌鼠标选择；双击防重与刷新恢复；响应丢失后原 request_id 重试不重复扣牌/重播；旧局响应迟到不污染新局；真实服务重启后旧会话失效；逐事件公开牌展示、操作锁及新局取消旧播放。人工查看真实浏览器截图，四座位分居四边，27 张手牌按点数向上竖叠且底边对齐。
+
+测试最初复现了竖排选中/悬停牌遮挡同列下一张的鼠标问题，移除额外层级后，对应浏览器回归由失败转为通过。浏览器测试运行时的 `ECONNREFUSED` 仅出现在有意重启后端的用例轮询期间。
+
+### 完整复验
+
+| 目录 | 命令 | 结果 |
+|---|---|---|
+| `backend/` | `.\\mvnw.cmd test` | 260 项通过，0 失败/错误 |
+| `backend/` | `.\\mvnw.cmd -q -Pslow test` | 退出 0 |
+| `backend/` | `.\\mvnw.cmd -q -Pperformance test` | 退出 0 |
+| `backend/` | `.\\mvnw.cmd -q -DskipTests package` | 退出 0；生产 JAR 无测试 fixture 类 |
+| `frontend/` | `npm run test:unit -- --run` | 85/85 通过 |
+| `frontend/` | `npm run typecheck`、`npm run build` | 均退出 0 |
+| `frontend/` | `npx playwright test` | 10/10 通过 |
+| 仓库根目录 | `git diff --check` | 退出 0 |
+
+### 已知限制
+
+牌局和幂等记录仅在本地单 JVM 内存中，重启统一清空，旧局暂不自动回收。当前不支持联机、升级/贡还和跨局进度；浏览器自动化只覆盖桌面 Edge，移动端和多人并发需在在线版阶段验收。

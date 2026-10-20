@@ -243,6 +243,31 @@
           }
         }
       },
+      "EventView" : {
+        "properties" : {
+          "seq" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "state_version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "event_type" : {
+            "type" : "string"
+          },
+          "actor_id" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "payload" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "object"
+            }
+          }
+        }
+      },
       "GameView" : {
         "properties" : {
           "game_id" : {
@@ -297,6 +322,12 @@
           "version" : {
             "type" : "integer",
             "format" : "int64"
+          },
+          "round_events" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EventView"
+            }
           }
         }
       },
@@ -460,31 +491,6 @@
             "type" : "array",
             "items" : {
               "$ref" : "#/components/schemas/EventView"
-            }
-          }
-        }
-      },
-      "EventView" : {
-        "properties" : {
-          "seq" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "state_version" : {
-            "type" : "integer",
-            "format" : "int64"
-          },
-          "event_type" : {
-            "type" : "string"
-          },
-          "actor_id" : {
-            "type" : "integer",
-            "format" : "int32"
-          },
-          "payload" : {
-            "type" : "object",
-            "additionalProperties" : {
-              "type" : "object"
             }
           }
         }

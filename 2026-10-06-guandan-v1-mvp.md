@@ -471,6 +471,8 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 - [ ] 同一单测、typecheck、build 全部成功。
 - [ ] 提交 `feat: submit moves and recover game commands`。
 
+**执行状态（2026-10-18）：T9 已通过阶段门。** 0/1/多声明、提示、出牌/过牌、pending 原样重试与跨局隔离、版本保护、事件去重和播放均有前端单测；后续复审补齐了重同步请求防竞态、断网恢复后无展示起点直接采用最终快照，以及较新快照落地后清除重同步锁的回归覆盖。复验 `npm run test:unit -- --run` 为 78 项通过，`npm run typecheck` 和 `npm run build` 均通过。真实浏览器整局与性能完整验收仍归 T10–T11；上方任务清单保留原始执行步骤，不以当前勾选状态表示验收结果。
+
 ### T10：属性测试、自动对局与复现，7–13 小时
 
 **Files:** `backend/src/main/java/com/guandan/cli/GuandanCli.java`、`backend/src/test/java/com/guandan/engine/{GamePropertiesTest,SimulationTest,ReplayTest}.java`；扩展 T4 已建立的 `GenerationBenchmarkTest` 与固定 `benchmark_hands.json`，不另起一套基准输入。
@@ -499,6 +501,8 @@ T4a → T4b → T4c 顺序执行；每步独立验证和提交，不以最后一
 - [ ] 再运行 Playwright、全部后端测试、前端单测/typecheck/build；保存命令、环境、结果与已知限制。
 - [ ] README 写明 JDK 17/Node 环境、Maven Wrapper 安装与前后端两进程启动方法、单 JVM 限制、关闭动画方式、如何复现失败；说明 v1 仅在本地进程生命周期内保留牌局及幂等记录，重启统一清空，暂不自动回收旧局。
 - [ ] 提交 `docs: deliver verified guandan v1 MVP`；只在实际验证通过后标记 v1 完成。
+
+**执行状态（2026-10-20）：T11 浏览器与交付验收通过，本地单局 v1 MVP 完成。** 真实 Spring HTTP + Edge 浏览器的 10 项 Playwright 用例覆盖上方主线、短手牌结算、双击、声明、刷新/响应丢失重试、后端进程重启、跨局隔离、事件播放和竖排手牌鼠标选择；标准、slow、performance 后端测试与前端单测、typecheck、build 均通过。测试专用固定局未进入生产 JAR。证据和边界见 `docs/test-report-v1.md`；上方清单保留原始执行步骤，不以勾选状态表示结果。
 
 ## 测试计划与预期矩阵
 

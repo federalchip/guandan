@@ -110,6 +110,14 @@ class GameServiceTest {
         GameView refreshed = svc.getGame(id, token);
         assertEquals(cr.state().version(), refreshed.version(), "刷新快照与命令结果一致");
         assertEquals(26, refreshed.ownHand().size(), "真人出一张后剩 26");
+        int lastClose = -1;
+        for (int i = 0; i < cr.events().size(); i++) {
+            if ("TRICK_CLOSED".equals(cr.events().get(i).eventType())) lastClose = i;
+        }
+        assertEquals(cr.events().subList(lastClose + 1, cr.events().size()), refreshed.roundEvents(),
+                "刷新后应恢复尚未结束的本轮公开事件");
+        assertEquals(refreshed.roundEvents(), cr.state().roundEvents(),
+                "命令快照与刷新快照应包含相同的本轮公开事件");
     }
 
     @Test

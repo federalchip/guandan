@@ -16,8 +16,7 @@ function numOf(v: unknown): number | undefined {
 
 /**
  * 把一个事件投影到展示态，返回新的 GameView（不改入参）。只用事件里已有的权威字段
- * （余牌数、出牌者、牌型/张数、next_leader、名次），不在前端重实现规则；对手所出牌的
- * 牌面不在事件 payload 里，故中间步骤只呈现张数/牌型，真牌面在收敛快照显示。
+ * （余牌数、出牌者、公开牌面、牌型/张数、next_leader、名次），不在前端重实现规则。
  * nextCurrent 为下一动作座位（末尾用最终快照的 current_player），用于推进回合高亮。
  */
 export function projectEvent(base: GameView, event: EventView, nextCurrent: number | undefined): GameView {
@@ -36,9 +35,12 @@ export function projectEvent(base: GameView, event: EventView, nextCurrent: numb
       if (actor != null) {
         const remaining = numOf(payload.remaining)
         if (remaining != null) next.remaining_counts![actor] = remaining
-        // 自己出的牌能从手牌还原真面；对手牌面事件里没有 → 收敛快照再显示
-        const faces: CardView[] =
-          actor === HUMAN_SEAT ? (base.own_hand ?? []).filter((c) => c.card_id != null && cards.includes(c.card_id)) : []
+        const publicFaces = Array.isArray(payload.played_cards)
+          ? (payload.played_cards as CardView[]).filter((c) => c && typeof c.card_id === 'number')
+          : []
+        // 新事件直接使用后端给出的自然牌面；旧事件中的本人出牌仍可从手牌还原。
+        const faces: CardView[] = publicFaces.length ? publicFaces
+          : actor === HUMAN_SEAT ? (base.own_hand ?? []).filter((c) => c.card_id != null && cards.includes(c.card_id)) : []
         next.trick = {
           owner_id: actor,
           move: {
