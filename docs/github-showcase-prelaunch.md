@@ -11,9 +11,9 @@ GitHub Pages 只能托管静态前端。当前前端请求同源根路径 `/api/
 
 ## 1. 仓库内展示材料
 
-- [x] README 开头说明玩法、技术栈、项目状态与主要界面特点，并链接测试报告、上线计划和本文件。
+- [x] README 以游戏体验、本地试玩和主要界面特点为主；开发与验收资料集中在 `docs/development.md`。
 - [x] README 留出真实牌桌截图位置；用户选择暂不提供截图，因此目前没有空白图片或失效链接。
-- [x] README 保留 Windows 一键启动、手动启动、试玩说明、验证命令和已知限制。
+- [x] README 保留 Windows 一键启动和试玩说明；手动启动、验证命令及已知限制移至开发文档。
 - [x] 根目录添加 `LICENSE`，采用标准 MIT 文本，版权署名 `2026 federalchip`。
 - [ ] 日后从真实运行界面截取桌面牌桌，确认四座位、27 张手牌和公开出牌可辨认，再替换 README 的截图占位。若增加视频，优先用仓库支持的链接或轻量外部视频托管，避免提交大型视频文件。
 - [ ] 发布前复查截图、提交历史和配置文件，确保没有会话令牌、密钥、个人路径或其他不应公开的素材；确认图像、字体及其他第三方素材的使用许可。
@@ -23,17 +23,17 @@ GitHub Pages 只能托管静态前端。当前前端请求同源根路径 `/api/
 在仓库 `Settings` / `About` 中，由有管理权限的账号完成并核对：
 
 - [x] 通过未登录的 GitHub 公共页面与已登录浏览器核对，`federalchip/guandan` 当前为 public。
-- [ ] Description 建议：`单人掼蛋 v1 MVP：1 人对 3 个随机机器人，Vue 3 + Spring Boot，本地可玩。`
-- [ ] Topics 建议：`guandan`、`card-game`、`vue3`、`spring-boot`、`typescript`、`java`。
-- [ ] Website 字段暂不填写。仅当真实可访问的项目展示页或在线试玩地址完成验收后再设置。
+- [x] Description 已设置：`掼蛋单人试玩版：1 人对 3 个机器人，支持本地运行。Vue 3 + Spring Boot`。
+- [ ] Topics 已设置；将误拼的 `guanndan` 修正为 `guandan`。其余为 `card-game`、`single-player`、`spring-boot`、`typescript`、`vue3`。
+- [x] Website 字段保持为空。仅当真实可访问的项目展示页或在线试玩地址完成验收后再设置。
 - [ ] 在个人主页置顶仓库（若希望访客从账号首页找到项目）。
 - [ ] 检查 GitHub 是否识别根目录 MIT License；检查 README 中的相对链接可打开。
 
-当前本地 Git remote 指向 `https://github.com/federalchip/guandan.git`。2026-10-21 已从公共页面与已登录的 Edge 页面确认仓库可访问、为 public；远程 `main` 仍停留在 `ec21071`，README 仍是 T8 文字，尚无 `start.cmd`、`stop.cmd`、LICENSE、描述、Topics 或 Release。本地 `main` 已到 `20c176c`，领先一个提交。GitHub 连接器登录为 `federalchip`，但没有可访问的仓库安装，因此返回 404；沙箱外 Git HTTPS 连接被重置，SSH 返回 `Permission denied (publickey)`。这属于当前执行环境的传输/授权问题，不是仓库不存在。
+2026-10-21 已确认仓库为 public，GitHub 连接器已获 `federalchip/guandan` 的授权，远程 `main` 已包含 v1 代码、`start.cmd`、`stop.cmd` 和 MIT LICENSE，且与本地 `main` 对齐。Description 已设置，Topics 有一处拼写待修正，Release 尚未创建；本轮 README 展示文案正在本地调整，尚未同步到 GitHub。
 
 ## 3. v1 Release 准入与发布
 
-- [ ] 将展示材料与已有的未提交 README 修改一起审查，确认哪些内容属于 v1；不要把当前未实施的公开上线计划写成已完成。
+- [ ] 审查更新后的 README 与展示材料，确认哪些内容属于 v1；不要把当前未实施的公开上线计划写成已完成。
 - [ ] 在准备发布的提交上运行后端测试、前端单测、类型检查和生产构建；记录命令、结果与提交 SHA。按需引用已有 T10/T11 报告，不能以旧报告代替新提交验证。
 - [ ] 确认需要发布的提交已合并到 `main` 并成功推送，工作区无遗漏的发布文件。
 - [ ] 创建 GitHub Release，标签建议 `v1.0.0`（仅在没有同名标签时）；标题建议 `掼蛋 v1：本地单人 MVP`。正文说明已实现功能、JDK/Node 要求、启动步骤、测试依据与当前限制。
@@ -47,7 +47,7 @@ Release 的创建与仓库公开会使内容对外可见；在执行前需完成
 
 ## 待人工决定
 
-1. 仓库是否公开，以及公开前对历史提交和素材的复核结论。
+1. 对历史提交和素材的公开复核结论。
 2. 何时提供真实牌桌截图或短视频。
 3. 是否现在制作纯静态 Pages 介绍页；这不是启动游戏所必需。
 4. `v1.0.0` Release 的发布时间、发布提交和最终说明。
