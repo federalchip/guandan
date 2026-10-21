@@ -29,7 +29,7 @@ GitHub Pages 只能托管静态前端。当前前端请求同源根路径 `/api/
 - [ ] 在个人主页置顶仓库（若希望访客从账号首页找到项目）。
 - [ ] 检查 GitHub 是否识别根目录 MIT License；检查 README 中的相对链接可打开。
 
-2026-10-21 已确认仓库为 public，GitHub 连接器已获 `federalchip/guandan` 的授权，远程 `main` 已包含 v1 代码、`start.cmd`、`stop.cmd` 和 MIT LICENSE，且与本地 `main` 对齐。Description 已设置，Topics 有一处拼写待修正，Release 尚未创建；本轮 README 展示文案正在本地调整，尚未同步到 GitHub。
+2026-10-21 已确认仓库为 public，GitHub 连接器已获 `federalchip/guandan` 的授权，远程 `main` 已包含 v1 代码、`start.cmd`、`stop.cmd`、MIT LICENSE 和面向访客的 README，且与本地 `main` 对齐。Description 已设置，Topics 有一处拼写待修正，Release 尚未创建。
 
 ## 3. v1 Release 准入与发布
 
