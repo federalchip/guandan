@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { createGameState } from './state/game'
 import { sortHandForDisplay, LEVEL_RANK } from './state/handOrder'
-import { describeEvent } from './state/eventLabel'
+import { describeEvent, seatName } from './state/eventLabel'
 import { createGameApi } from './api/game'
 import type { components } from './api/schema'
 import Table from './components/Table.vue'
@@ -14,17 +14,18 @@ import DeclarationPicker from './components/DeclarationPicker.vue'
 type EventView = components['schemas']['EventView']
 
 const api = createGameApi()
+const reduceMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 // 播放当前事件的展示态：动画期间逐事件更新，驱动牌桌上的“逐步出牌”叙述。
 const lastEvent = ref<EventView | null>(null)
 // 生产环境开启动画：命令响应按 seq 逐事件播放，玩家能看到bot依次出牌/过牌，而非直接跳到最终快照。
 const store = createGameState({
   api,
-  animate: true,
+  animate: !reduceMotion,
   onEvent: (e) => {
     lastEvent.value = e
   },
 })
-// 动画收敛（display 落到最终快照）后撤下叙述条，避免与已就位的牌桌重复。
+// 动画收敛（display 落到最终快照）后撤下读屏播报，避免重复讲述已就位的牌桌。
 watch(
   () => store.state.animating,
   (animating) => {
@@ -49,6 +50,15 @@ const playback = computed(() => (store.state.animating && lastEvent.value ? desc
 const canAct = computed(
   () => started.value && !finished.value && !store.state.busy && view.value?.current_player === 0,
 )
+const turnStatus = computed(() => {
+  if (!view.value) return canRetry.value ? '上一局结果待确认，请重试' : '准备开始'
+  if (finished.value) return '本局结束'
+  if (canRetry.value) return '上一步结果待确认'
+  if (store.state.animating) return '正在展示本轮行动'
+  if (store.state.busy) return '正在处理，请稍候'
+  if (view.value.current_player === 0) return '轮到你出牌'
+  return `等待${seatName(view.value.current_player)}出牌`
+})
 
 onMounted(() => store.recover())
 </script>
@@ -56,14 +66,14 @@ onMounted(() => store.recover())
 <template>
   <div class="app">
     <header class="topbar">
-      <h1>掼蛋 v1</h1>
+      <h1>掼蛋</h1>
       <label class="anim-toggle">
         <input
           type="checkbox"
           :checked="store.state.animate"
           @change="store.setAnimate(($event.target as HTMLInputElement).checked)"
         />
-        动画
+        逐步播放
       </label>
     </header>
     <ActionBar
@@ -74,6 +84,8 @@ onMounted(() => store.recover())
       :can-pass="canPass"
       :can-retry="canRetry"
       :selected-count="selectedCount"
+      :turn-status="turnStatus"
+      :notice="notice"
       @start="store.createGame"
       @restart="store.createGame"
       @play="store.playSelection"
@@ -81,8 +93,7 @@ onMounted(() => store.recover())
       @hint="store.cycleHint"
       @retry="store.retryPendingCommand"
     />
-    <p v-if="notice" class="notice">{{ notice }}</p>
-    <p v-if="playback" class="playback" data-testid="playback">{{ playback }}</p>
+    <p v-if="playback" class="playback" role="status" aria-live="polite" data-testid="playback">{{ playback }}</p>
     <DeclarationPicker
       v-if="choices && choices.length"
       :choices="choices"
@@ -99,6 +110,8 @@ onMounted(() => store.recover())
             :can-pass="canPass"
             :can-retry="canRetry"
             :selected-count="selectedCount"
+            :turn-status="turnStatus"
+            :notice="notice"
             @start="store.createGame"
             @restart="store.createGame"
             @play="store.playSelection"
@@ -111,52 +124,55 @@ onMounted(() => store.recover())
       <Hand :cards="ownHand" :selected="store.state.selected" @select="store.toggleSelected" />
       <ResultPanel v-if="finished && result" :result="result" />
     </template>
-    <p v-else-if="!canRetry" class="hint">点击「开始一局」发牌。</p>
+    <p v-else-if="!canRetry" class="hint">你和搭档对阵左右两家，使用两副牌、固定打 2。开始后，轮到你时选牌并出牌。</p>
   </div>
 </template>
 
 <style scoped>
 .app {
-  max-width: 960px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding-bottom: 24px;
+  padding: 0 12px 32px;
 }
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 18px 8px 14px;
 }
 .topbar h1 {
-  font-size: 20px;
+  font-size: 24px;
+  letter-spacing: 0.04em;
   margin: 0;
 }
 .anim-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   user-select: none;
 }
-.notice {
-  margin: 10px 16px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgba(220, 38, 38, 0.2);
-  border: 1px solid #dc2626;
-}
 .playback {
-  margin: 10px 16px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: rgba(245, 158, 11, 0.18);
-  border: 1px solid #f59e0b;
-  font-size: 14px;
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .hint {
-  padding: 24px 16px;
-  text-align: center;
-  opacity: 0.8;
+  max-width: 50ch;
+  padding: 20px 8px;
+  margin: 0;
+  line-height: 1.7;
+  color: rgba(248, 246, 237, 0.88);
+}
+@media (max-width: 640px) {
+  .app { padding: 0 6px 24px; }
+  .topbar { padding: 14px 10px 10px; }
+  .topbar h1 { font-size: 21px; }
 }
 </style>

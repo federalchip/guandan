@@ -25,5 +25,5 @@ export async function snapshot(page: Page, session: Session): Promise<Record<str
 }
 
 export async function disableAnimation(page: Page): Promise<void> {
-  await page.getByRole('checkbox', { name: '动画' }).uncheck()
+  await page.getByRole('checkbox', { name: '逐步播放' }).uncheck()
 }

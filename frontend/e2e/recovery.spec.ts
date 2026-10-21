@@ -75,7 +75,8 @@ test('旧局动作响应迟到时，新局不被覆盖或带入旧 pending', asy
   await page.getByRole('button', { name: '提示' }).click()
   await page.getByRole('button', { name: '出牌' }).click()
   await oldApplied
-  await page.getByRole('button', { name: '再来一局' }).click()
+  await page.getByRole('button', { name: '重新开局' }).click()
+  await page.getByRole('button', { name: '结束并重新开始' }).click()
   await expect.poll(async () => (await currentSession(page)).game_id).not.toBe(old.game_id)
   const fresh = await currentSession(page)
   const lateResponse = page.waitForResponse((response) =>

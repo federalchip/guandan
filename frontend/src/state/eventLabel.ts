@@ -17,10 +17,11 @@ export const KIND_LABEL: Record<string, string> = {
 }
 
 const RANK_LABEL: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A', 15: '小王', 16: '大王' }
+export const SEAT_LABEL = ['你', '下家', '搭档', '上家'] as const
 
-function seatName(actorId: unknown): string {
+export function seatName(actorId: unknown): string {
   if (typeof actorId !== 'number') return '桌面'
-  return actorId === 0 ? '你' : `座位 ${actorId}`
+  return SEAT_LABEL[actorId] ?? '玩家'
 }
 
 function rankLabel(rank: unknown): string {
@@ -37,21 +38,21 @@ export function describeEvent(event: EventView): string {
   const payload = (event.payload ?? {}) as Record<string, unknown>
   switch (event.event_type) {
     case 'PLAYED': {
-      const parts = [`${seatName(event.actor_id)} 出牌`, kindLabel(payload.kind)]
+      const parts = [`${seatName(event.actor_id)}出牌`, kindLabel(payload.kind)]
       if (typeof payload.length === 'number') parts.push(`${payload.length} 张`)
       const r = rankLabel(payload.main_rank)
       if (r) parts.push(`主点 ${r}`)
       return parts.join(' · ')
     }
     case 'PASSED':
-      return `${seatName(event.actor_id)} 过牌`
+      return `${seatName(event.actor_id)}过牌`
     case 'TRICK_CLOSED': {
       const next = payload.next_leader
       return typeof next === 'number' && next >= 0 ? `本墩结束 · 由${seatName(next)}领出` : '本墩结束'
     }
     case 'PLAYER_FINISHED': {
       const pos = payload.position
-      return typeof pos === 'number' ? `${seatName(event.actor_id)} 完成 · 第 ${pos} 名` : `${seatName(event.actor_id)} 完成`
+      return typeof pos === 'number' ? `${seatName(event.actor_id)}完成 · 第 ${pos} 名` : `${seatName(event.actor_id)}完成`
     }
     case 'GAME_FINISHED':
       return '牌局结束'

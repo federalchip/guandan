@@ -7,7 +7,7 @@ test('真实整局起手：27 张、提示、出牌、机器人批次、回到�
   const create = page.waitForResponse((response) => response.url().endsWith('/api/v1/games') && response.request().method() === 'POST')
   await page.getByRole('button', { name: '开始一局' }).click()
   expect((await create).status()).toBe(201)
-  await expect(page.getByText('单局 · 两副牌 108 张 · 固定打 2')).toBeVisible()
+  await expect(page.getByRole('status').first()).toContainText('轮到你出牌')
   await expect(page.locator('.hand .card')).toHaveCount(27)
   await page.screenshot({ path: 'test-results/t11-table-desktop.png', fullPage: true })
   const session = await currentSession(page)

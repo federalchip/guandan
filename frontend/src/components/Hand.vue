@@ -21,21 +21,26 @@ const groups = computed(() => {
 </script>
 
 <template>
-  <div class="hand">
-    <div v-for="group in groups" :key="group.rank" class="rank-group">
-      <Card
-        v-for="c in group.cards"
-        :key="c.card_id"
-        :card="c"
-        interactive
-        :selected="selected.has(c.card_id as number)"
-        @select="(id) => emit('select', id)"
-      />
+  <div class="hand-shell">
+    <p v-if="groups.length > 4" class="hand-scroll-hint">左右滑动查看更多手牌</p>
+    <div class="hand" tabindex="0" role="region" aria-label="我的手牌">
+      <div v-for="group in groups" :key="group.rank" class="rank-group">
+        <Card
+          v-for="c in group.cards"
+          :key="c.card_id"
+          :card="c"
+          interactive
+          :selected="selected.has(c.card_id as number)"
+          @select="(id) => emit('select', id)"
+        />
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+.hand-shell { min-width: 0; margin-top: 8px; }
+.hand-scroll-hint { display: none; }
 .hand {
   display: flex;
   flex-wrap: nowrap;
@@ -44,6 +49,7 @@ const groups = computed(() => {
   justify-content: safe center;
   align-items: flex-end;
   overflow-x: auto;
+  scrollbar-color: var(--gold) var(--felt-deep);
 }
 .rank-group {
   display: flex;
@@ -69,6 +75,17 @@ const groups = computed(() => {
   transform: none;
 }
 .rank-group :deep(.card:hover) {
-  box-shadow: 0 0 0 2px #f59e0b;
+  box-shadow: 0 0 0 2px var(--gold);
+}
+@media (max-width: 640px) {
+  .hand-scroll-hint {
+    display: block;
+    margin: 8px 16px 0;
+    font-size: 12px;
+    color: var(--gold);
+    font-weight: 700;
+  }
+  .hand { justify-content: flex-start; padding: 12px 12px 20px; }
+  .rank-group > * + * { margin-top: -30px; }
 }
 </style>

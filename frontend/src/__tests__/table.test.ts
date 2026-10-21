@@ -35,15 +35,19 @@ describe('牌桌渲染渐进投影态', () => {
     expect(w.find('[data-seat="0"] [data-card-id="4"]').exists()).toBe(true)
     expect(w.find('[data-seat="1"] [data-card-id="8"]').exists()).toBe(true)
     expect(w.find('[data-seat="2"] .pass-marker').text()).toBe('不出')
+    expect(w.find('[data-seat="1"]').classes()).toContain('leading')
+    expect(w.find('.seat-avatar').exists()).toBe(false)
   })
 
   it('test_renders_trick_label_and_backs_for_hidden_faces', () => {
     const w = mount(Table, {
       props: { view: view({ owner_id: 1, move: { kind: 'PAIR', length: 2, main_rank: 9 }, cards: [] }) },
     })
-    expect(w.text()).toContain('出牌者座位 1')
+    expect(w.text()).toContain('下家出的牌')
+    expect(w.text()).not.toContain('座位 1')
     expect(w.text()).toContain('对子 · 2 张 · 主点 9') // 牌型/张数/主点可见
-    expect(w.findAll('.card-back').length).toBe(2) // 对手牌面未知 → 两张牌背
+    expect(w.findAll('[data-seat="1"] .card-back')).toHaveLength(2) // 对手牌面未知 → 两张牌背
+    expect(w.findAll('.center .card-back')).toHaveLength(2)
     expect(w.text()).toContain('26 张') // 座位1余牌递减可见
   })
 
@@ -55,10 +59,12 @@ describe('牌桌渲染渐进投影态', () => {
     })
     expect(w.findAll('.card-back').length).toBe(0)
     expect(w.find('[data-card-id="4"]').exists()).toBe(true) // 真牌面渲染
+    expect(w.find('.center [data-card-id="4"]').exists()).toBe(true)
+    expect(w.get('.trick-cards').attributes('role')).toBe('group')
   })
 
   it('test_empty_trick_waits_for_lead', () => {
     const w = mount(Table, { props: { view: view(undefined) } })
-    expect(w.text()).toContain('等待领出')
+    expect(w.text()).toContain('等待下家领出')
   })
 })

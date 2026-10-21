@@ -13,22 +13,22 @@ describe('事件叙述（动画逐步播放的可读文本）', () => {
     const text = describeEvent(
       ev({ event_type: 'PLAYED', actor_id: 2, payload: { kind: 'STRAIGHT_FLUSH', length: 5, main_rank: 14 } as never }),
     )
-    expect(text).toBe('座位 2 出牌 · 同花顺 · 5 张 · 主点 A')
+    expect(text).toBe('搭档出牌 · 同花顺 · 5 张 · 主点 A')
   })
 
   it('test_played_by_human_uses_you', () => {
     const text = describeEvent(ev({ event_type: 'PLAYED', actor_id: 0, payload: { kind: 'SINGLE' } as never }))
-    expect(text).toContain('你 出牌')
+    expect(text).toContain('你出牌')
     expect(text).toContain('单张')
   })
 
   it('test_passed', () => {
-    expect(describeEvent(ev({ event_type: 'PASSED', actor_id: 3 }))).toBe('座位 3 过牌')
+    expect(describeEvent(ev({ event_type: 'PASSED', actor_id: 3 }))).toBe('上家过牌')
   })
 
   it('test_trick_closed_names_next_leader', () => {
     expect(describeEvent(ev({ event_type: 'TRICK_CLOSED', payload: { next_leader: 1 } as never }))).toBe(
-      '本墩结束 · 由座位 1领出',
+      '本墩结束 · 由下家领出',
     )
   })
 
@@ -38,7 +38,7 @@ describe('事件叙述（动画逐步播放的可读文本）', () => {
 
   it('test_player_finished_with_position', () => {
     expect(describeEvent(ev({ event_type: 'PLAYER_FINISHED', actor_id: 2, payload: { position: 1 } as never }))).toBe(
-      '座位 2 完成 · 第 1 名',
+      '搭档完成 · 第 1 名',
     )
   })
 
