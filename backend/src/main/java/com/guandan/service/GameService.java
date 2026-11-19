@@ -10,16 +10,12 @@ import com.guandan.api.dto.GameView;
 import com.guandan.api.dto.LegalActionsResponse;
 import com.guandan.api.dto.ResolveRequest;
 import com.guandan.api.dto.ResolveResponse;
-import com.guandan.bots.BotSeeds;
 import com.guandan.domain.RuleProfile;
 import com.guandan.domain.model.Action;
-import com.guandan.domain.model.DomainEvent;
-import com.guandan.domain.model.EngineOutcome;
 import com.guandan.domain.model.GameRuleException;
 import com.guandan.domain.model.GameState;
 import com.guandan.domain.model.Move;
 import com.guandan.domain.model.Phase;
-import com.guandan.domain.model.PlayerView;
 import com.guandan.engine.GameEngine;
 import com.guandan.engine.PlayerViewFactory;
 import com.guandan.rules.LegalMoveGenerator;
@@ -30,7 +26,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.SplittableRandom;
 import java.util.UUID;
 
 /**
@@ -44,12 +39,12 @@ public class GameService {
 
     private static final RuleProfile PROFILE = RuleProfile.v1();
     private static final int HUMAN_SEAT = 0;
-    private static final int MAX_BOT_STEPS = 512;
 
     private final InMemoryGameStore store;
     private final GameSeedSource seedSource;
     private final BotPolicy policy;
     private final ActionAdvancer advancer;
+    private final BotBatchRunner runner;
 
     public GameService(InMemoryGameStore store, GameSeedSource seedSource, BotPolicy policy,
                        ActionAdvancer advancer) {
@@ -57,6 +52,7 @@ public class GameService {
         this.seedSource = seedSource;
         this.policy = policy;
         this.advancer = advancer;
+        this.runner = new BotBatchRunner(policy, advancer);
     }
 
     public CreatedGame createGame() {
@@ -131,48 +127,17 @@ public class GameService {
             GameState work = rec.state;
             requireVersion(work, command.expectedVersion());
 
-            List<SequencedEvent> newEvents = new ArrayList<>();
-            long seq = rec.nextSeq;
-
-            EngineOutcome humanOut = advancer.applyAction(work, HUMAN_SEAT, toAction(command.action()));
-            seq = appendEvents(newEvents, seq, humanOut);
-            work = humanOut.state();
-            long acceptedVersion = work.version();
-
-            int botSteps = 0;
-            while (work.phase() == Phase.PLAYING) {
-                Integer cp = work.currentPlayer();
-                if (cp == null) {
-                    break;
-                }
-                if (cp == HUMAN_SEAT && !work.hands().get(HUMAN_SEAT).isEmpty()) {
-                    break;
-                }
-                if (botSteps >= MAX_BOT_STEPS) {
-                    throw new GameRuleException("BOT_STEP_LIMIT",
-                            "机器人步数超过上限 " + MAX_BOT_STEPS, Map.of("limit", MAX_BOT_STEPS));
-                }
-                int seat = cp;
-                List<Action> legal = GameEngine.getLegalActions(work, seat);
-                PlayerView view = PlayerViewFactory.getPlayerView(work, seat);
-                long botSeed = BotSeeds.derive(rec.gameSeed, work.version(), seat);
-                Action botAction = policy.chooseAction(view, legal, new SplittableRandom(botSeed));
-                EngineOutcome botOut = advancer.applyAction(work, seat, botAction);
-                seq = appendEvents(newEvents, seq, botOut);
-                work = botOut.state();
-                botSteps++;
-            }
-
-            rec.state = work;
-            rec.events.addAll(newEvents);
-            rec.nextSeq = seq;
+            BotBatchRunner.BatchResult r = runner.run(work, toAction(command.action()), rec.gameSeed, rec.nextSeq);
+            rec.state = r.state();
+            rec.events.addAll(r.events());
+            rec.nextSeq = r.nextSeq();
             GameView finalView = DtoMapper.toGameView(rec.gameId,
-                    PlayerViewFactory.getPlayerView(work, HUMAN_SEAT), currentRoundEvents(rec.events));
-            List<EventView> eventViews = new ArrayList<>(newEvents.size());
-            for (SequencedEvent se : newEvents) {
+                    PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(rec.events));
+            List<EventView> eventViews = new ArrayList<>(r.events().size());
+            for (SequencedEvent se : r.events()) {
                 eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
             }
-            CommandResponse response = new CommandResponse(command.requestId(), acceptedVersion,
+            CommandResponse response = new CommandResponse(command.requestId(), r.acceptedVersion(),
                     finalView, List.copyOf(eventViews));
             rec.idempotency.put(command.requestId(), new CachedCommand(fingerprint, response));
             return response;
@@ -182,14 +147,6 @@ public class GameService {
     }
 
     // ---- 辅助 ----
-
-    private static long appendEvents(List<SequencedEvent> sink, long seq, EngineOutcome out) {
-        long stateVersion = out.state().version();
-        for (DomainEvent e : out.events()) {
-            sink.add(new SequencedEvent(seq++, stateVersion, e));
-        }
-        return seq;
-    }
 
     /** 最近一次 TRICK_CLOSED 后的公开事件，供刷新恢复本轮各座位的展示。 */
     private static List<EventView> currentRoundEvents(List<SequencedEvent> events) {
