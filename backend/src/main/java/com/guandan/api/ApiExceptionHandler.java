@@ -40,7 +40,10 @@ public class ApiExceptionHandler {
             Map.entry("AMBIGUOUS_DECLARATION", HttpStatus.CONFLICT),
             Map.entry("SCHEMA_INVALID", HttpStatus.UNPROCESSABLE_ENTITY),
             Map.entry("BOT_STEP_LIMIT", HttpStatus.INTERNAL_SERVER_ERROR),
-            Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR));
+            Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("GAME_BUSY", HttpStatus.CONFLICT),
+            Map.entry("COMMAND_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("COMMAND_QUEUE_FULL", HttpStatus.SERVICE_UNAVAILABLE));
 
     @ExceptionHandler(GameRuleException.class)
     public ResponseEntity<ErrorBody> handleGameRule(GameRuleException ex) {
