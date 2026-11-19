@@ -26,6 +26,8 @@
 | `POST /api/v1/games/{id}/actions` | Bearer | CommandRequest | `200` CommandResponse（真人 + 机器人批次） |
 | `GET /api/v1/health` | 无 | 无 | `200 {"status":"UP"}` |
 
+异步模式（202/命令查询/GAME_BUSY 等）见下文『异步命令模式』章节。
+
 ## 数据结构
 
 ### GameView

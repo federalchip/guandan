@@ -38,7 +38,7 @@
 **Interfaces:**
 - Produces: `BotBatchRunner`（包私有 final 类）构造器 `BotBatchRunner(BotPolicy policy, ActionAdvancer advancer)`；方法 `BatchResult run(GameState initial, Action humanAction, long gameSeed, long startSeq)`；嵌套 `record BatchResult(GameState state, long acceptedVersion, List<SequencedEvent> events, long nextSeq)`（events 不可变）。`run` 在私有状态上应用真人动作（座位 0）+ 机器人循环，失败抛 `GameRuleException`（含 `BOT_STEP_LIMIT`），**不触碰 GameRecord、不持锁**。Task 2/3 的同步与异步路径都调用它。
 
-- [ ] **Step 1: 写失败测试 BotBatchRunnerTest**
+- [x] **Step 1: 写失败测试 BotBatchRunnerTest**
 
 ```java
 package com.guandan.service;
@@ -128,12 +128,12 @@ class BotBatchRunnerTest {
 
 注意：`Move` 的访问器名以 `domain/model/Move.java` 实际 record 组件为准（`cardIds()`/`interpretationKey()`）；若命名不同，按实际调整本测试与后续代码，不得改 Move 本身。
 
-- [ ] **Step 2: 运行确认红**
+- [x] **Step 2: 运行确认红**
 
 Run: `./mvnw.cmd -Dtest=BotBatchRunnerTest test`
 Expected: 编译失败，`BotBatchRunner` 不存在。
 
-- [ ] **Step 3: 实现 BotBatchRunner**
+- [x] **Step 3: 实现 BotBatchRunner**
 
 ```java
 package com.guandan.service;
@@ -218,7 +218,7 @@ final class BotBatchRunner {
 }
 ```
 
-- [ ] **Step 4: GameService.submit 委托 runner**
+- [x] **Step 4: GameService.submit 委托 runner**
 
 把 `GameService.submit` 中从 `List<SequencedEvent> newEvents = new ArrayList<>();` 到 `rec.nextSeq = seq;` 的整段（原 134–168 行）替换为：
 
@@ -246,12 +246,12 @@ final class BotBatchRunner {
 
 字段与构造器：新增 `private final BotBatchRunner runner;`，现有构造器末尾 `this.runner = new BotBatchRunner(policy, advancer);`。删除 `MAX_BOT_STEPS` 常量与 `appendEvents` 方法（已移入 runner）；清理不再使用的 import（`BotSeeds`、`DomainEvent`、`EngineOutcome`、`SplittableRandom`、`Action` 若仍被 toAction 使用则保留）。
 
-- [ ] **Step 5: 运行转绿 + 全量回归**
+- [x] **Step 5: 运行转绿 + 全量回归**
 
 Run: `./mvnw.cmd -Dtest=BotBatchRunnerTest,GameServiceTest test` → 全绿
 Run: `./mvnw.cmd test` → **262 tests**（260 基线 + 2 新增），0 失败。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/main/java/com/guandan/service/BotBatchRunner.java \
@@ -290,7 +290,7 @@ git commit -m "refactor: extract bot batch runner from game service"
   - `GameView.processingRequestId()`（可为 null，JSON 缺省）。
   - `GameRecord.currentJob`（包内可见）、`GameRecord.failures`。
 
-- [ ] **Step 1: 写失败测试 AsyncCommandTest**
+- [x] **Step 1: 写失败测试 AsyncCommandTest**
 
 ```java
 package com.guandan.service;
@@ -664,12 +664,12 @@ class AsyncCommandTest {
 }
 ```
 
-- [ ] **Step 2: 运行确认红**
+- [x] **Step 2: 运行确认红**
 
 Run: `./mvnw.cmd -Dtest=AsyncCommandTest test`
 Expected: 编译失败（`CommandOutcome`、`AsyncCommandConfig`、六参构造器、`processingRequestId` 不存在）。
 
-- [ ] **Step 3: 新增四个服务层类型**
+- [x] **Step 3: 新增四个服务层类型**
 
 `CommandJob.java`：
 
@@ -727,7 +727,7 @@ public sealed interface CommandOutcome {
 }
 ```
 
-- [ ] **Step 4: GameRecord / InMemoryGameStore 扩展**
+- [x] **Step 4: GameRecord / InMemoryGameStore 扩展**
 
 `GameRecord` 新增字段与五参构造器（保留四参委托，asyncMode=false）：
 
@@ -765,7 +765,7 @@ public sealed interface CommandOutcome {
     }
 ```
 
-- [ ] **Step 5: GameView + DtoMapper 增加 processing_request_id**
+- [x] **Step 5: GameView + DtoMapper 增加 processing_request_id**
 
 `GameView` record 末尾追加组件（import `com.fasterxml.jackson.annotation.JsonInclude`）：
 
@@ -787,7 +787,7 @@ public sealed interface CommandOutcome {
     }
 ```
 
-- [ ] **Step 6: GameService 异步编排**
+- [x] **Step 6: GameService 异步编排**
 
 新增 import：`org.springframework.beans.factory.annotation.Autowired`、`java.util.concurrent.Executor`、`java.util.concurrent.RejectedExecutionException`、`org.slf4j.Logger`、`org.slf4j.LoggerFactory`。
 
@@ -970,22 +970,32 @@ public sealed interface CommandOutcome {
         }
     }
 
-    /** 锁内调用：一次提交状态、事件、序号与幂等收据。 */
+    /**
+     * 锁内调用：先构建完整响应（映射失败时记录分毫未动，ownsJob 仍成立，failJob 可落终态 FAILED），
+     * 再一次性提交状态、事件、序号，最后写入幂等收据。（最终评审修复：map-before-mutate，
+     * 原"先改记录后映射"会在映射抛错时绕过 ownsJob 版本核对，导致无 FAILED 收据、永久 PENDING。）
+     */
     private CommandResponse commitBatch(GameRecord rec, String requestId, List<Object> fingerprint,
                                         BotBatchRunner.BatchResult r) {
+        CommandResponse response = buildResponse(rec, requestId, r);
         rec.state = r.state();
         rec.events.addAll(r.events());
         rec.nextSeq = r.nextSeq();
+        rec.idempotency.put(requestId, new CachedCommand(fingerprint, response));
+        return response;
+    }
+
+    /** 只读记录快照与批次结果构建响应，不改任何可变字段；包私有可覆写，仅供测试注入映射故障。 */
+    CommandResponse buildResponse(GameRecord rec, String requestId, BotBatchRunner.BatchResult r) {
+        List<SequencedEvent> combined = new ArrayList<>(rec.events);
+        combined.addAll(r.events());
         GameView finalView = DtoMapper.toGameView(rec.gameId,
-                PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(rec.events));
+                PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(combined));
         List<EventView> eventViews = new ArrayList<>(r.events().size());
         for (SequencedEvent se : r.events()) {
             eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
         }
-        CommandResponse response = new CommandResponse(requestId, r.acceptedVersion(),
-                finalView, List.copyOf(eventViews));
-        rec.idempotency.put(requestId, new CachedCommand(fingerprint, response));
-        return response;
+        return new CommandResponse(requestId, r.acceptedVersion(), finalView, List.copyOf(eventViews));
     }
 
     private void requireIdle(GameRecord rec) {
@@ -1007,7 +1017,7 @@ public sealed interface CommandOutcome {
 
 删除旧 submit 中已移走的批次/提交代码；`fingerprint`、`requireVersion`、`toAction`、`currentRoundEvents`、`authorize`、`requireSession` 保持不变。
 
-- [ ] **Step 7: ServiceConfig 装配 + application.yml**
+- [x] **Step 7: ServiceConfig 装配 + application.yml**
 
 `ServiceConfig` 新增（import `org.springframework.beans.factory.annotation.Value`、`java.util.concurrent.*`）：
 
@@ -1039,12 +1049,12 @@ guandan:
     poll-after-ms: 500
 ```
 
-- [ ] **Step 8: 运行转绿 + 全量回归**
+- [x] **Step 8: 运行转绿 + 全量回归**
 
 Run: `./mvnw.cmd -Dtest=AsyncCommandTest,GameServiceTest test` → 全绿
 Run: `./mvnw.cmd test` → **276 tests**（262 + 14 新增；GameView 新组件为 NON_NULL，既有 JSON 断言不变），0 失败。若 OpenApiSpecTest drift 因 GameView schema 变化而红，属预期——在 Task 3 Step 6 重新导出后转绿；本步骤先运行 `-Dtest='!OpenApiSpecTest'` 排除并记录，Task 3 必须修复。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add backend/src/main/java/com/guandan/service/CommandJob.java \
@@ -1080,7 +1090,7 @@ git commit -m "feat: register async commands with atomic batch commit"
 - Consumes: Task 2 的 `GameService.submitCommand/commandStatus` → `CommandOutcome`（Completed/Pending/Failed）。
 - Produces: `POST /api/v1/games/{id}/actions` → 200 `CommandResponse` | 200 `CommandFailed` | 202 `PendingResponse`；`GET /api/v1/games/{id}/commands/{requestId}` → 200 `CommandCompleted` | 200 `CommandFailed` | 202 `PendingResponse` | 404 `ErrorBody`。DTO：`PendingResponse(String requestId, String status, long pollAfterMs)`（便捷构造器固定 status="PENDING"）、`CommandCompleted(String status, CommandResponse result)`（status="COMPLETED"）、`CommandFailed(String status, ErrorBody error)`（便捷构造器 `(String code, String message)`）。
 
-- [ ] **Step 1: 写失败测试 AsyncHttpContractTest**
+- [x] **Step 1: 写失败测试 AsyncHttpContractTest**
 
 ```java
 package com.guandan.api;
@@ -1335,12 +1345,12 @@ class AsyncHttpContractTest {
 
 注意：`firstSingleBody` 中 `om.convertValue(m.get("card_ids"), List.class)` 产生 raw List，若编译告警可加 `@SuppressWarnings("unchecked")`；`assertNotEquals` import 若未用到则删除。
 
-- [ ] **Step 2: 运行确认红**
+- [x] **Step 2: 运行确认红**
 
 Run: `./mvnw.cmd -Dtest=AsyncHttpContractTest test`
 Expected: 编译失败（`PendingResponse` 等不存在）或路由 404/返回形态不符。
 
-- [ ] **Step 3: 新增三个 HTTP DTO**
+- [x] **Step 3: 新增三个 HTTP DTO**
 
 `PendingResponse.java`：
 
@@ -1383,7 +1393,7 @@ public record CommandFailed(String status, ErrorBody error) {
 }
 ```
 
-- [ ] **Step 4: GameController 路由与映射**
+- [x] **Step 4: GameController 路由与映射**
 
 `submit` 改返回 `ResponseEntity<Object>` 并调 `submitCommand`；新增 `commandStatus` 路由。JDK 17 用 instanceof 链（不用 switch 模式匹配）。springdoc 注解显式声明 200/202 schema（import `io.swagger.v3.oas.annotations.Operation`、`io.swagger.v3.oas.annotations.responses.ApiResponse`、`io.swagger.v3.oas.annotations.responses.ApiResponses`、`io.swagger.v3.oas.annotations.media.Content`、`io.swagger.v3.oas.annotations.media.Schema`）：
 
@@ -1442,7 +1452,7 @@ public record CommandFailed(String status, ErrorBody error) {
 
 新增 import：`com.guandan.api.dto.CommandCompleted`、`CommandFailed`、`PendingResponse`、`ErrorBody`、`com.guandan.service.CommandOutcome`。`SessionAuthInterceptor` 的路径模式 `/api/v1/games/*/**` 已覆盖新子路由，无需改动（在测试中验证 403/401 生效）。
 
-- [ ] **Step 5: ApiExceptionHandler 新错误码**
+- [x] **Step 5: ApiExceptionHandler 新错误码**
 
 `STATUS_BY_CODE` 追加三项：
 
@@ -1452,7 +1462,7 @@ public record CommandFailed(String status, ErrorBody error) {
             Map.entry("COMMAND_QUEUE_FULL", HttpStatus.SERVICE_UNAVAILABLE),
 ```
 
-- [ ] **Step 6: OpenApiSpecTest 扩展 + 导出规范**
+- [x] **Step 6: OpenApiSpecTest 扩展 + 导出规范**
 
 `spec_covers_game_routes_and_snake_case_action_fields` 的路径数组追加 `"/api/v1/games/{id}/commands/{requestId}"`，并新增断言：
 
@@ -1473,12 +1483,12 @@ Run: `./mvnw.cmd -Dtest=AsyncHttpContractTest,GameControllerTest,OpenApiSpecTest
 Expected: AsyncHttpContractTest 与 GameControllerTest 绿；OpenApiSpecTest 的 drift 检查红（规范未导出）。
 Run: `./mvnw.cmd -Dtest=OpenApiSpecTest -Dopenapi.export=true test` → 导出 `docs/openapi.json` 后全绿。
 
-- [ ] **Step 7: 全量回归**
+- [x] **Step 7: 全量回归**
 
 Run: `./mvnw.cmd test`
 Expected: **283 tests**（276 + 7 HTTP 新增），0 失败。GameControllerTest 原 10 例在默认同步上下文下不变。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/src/main/java/com/guandan/api/dto/PendingResponse.java \
@@ -1505,7 +1515,7 @@ git commit -m "feat: expose async command HTTP contract"
 - Consumes: Task 3 导出的 `docs/openapi.json`。
 - Produces: 与代码一致的 API 文档与前端类型；阶段 A 验收记录（测试数量、命令输出）。
 
-- [ ] **Step 1: 更新 docs/api-v1.md**
+- [x] **Step 1: 更新 docs/api-v1.md**
 
 在幂等/错误码章节后新增「异步命令模式（阶段 A，开关 `guandan.commands.async-enabled`，默认关闭）」章节，内容必须包含：
 
@@ -1540,13 +1550,13 @@ git commit -m "feat: expose async command HTTP contract"
 
 错误码表追加 `GAME_BUSY(409)`、`COMMAND_NOT_FOUND(404)`、`COMMAND_QUEUE_FULL(503)` 三行。
 
-- [ ] **Step 2: 更新设计文档**
+- [x] **Step 2: 更新设计文档**
 
 `docs/llm-bot-decision-design.md`：
 1. 状态行改为「阶段 A 已实施（异步本地策略）；B–E 待实施」。
 2. HTTP 合同草案表 `POST /actions` 行补充：执行器队列满返回 `503 COMMAND_QUEUE_FULL`（任务已清除，可原 ID 重试）；并在表后说明该码为实现期新增、已同步 api-v1.md。
 
-- [ ] **Step 3: 重新生成前端 schema 并验证前端不受影响**
+- [x] **Step 3: 重新生成前端 schema 并验证前端不受影响**
 
 Run（frontend/）: `npm run gen:api`
 Run: `npm run test:unit -- --run` → 96 tests 全绿
@@ -1554,19 +1564,19 @@ Run: `npm run typecheck` → exit 0
 Run: `npm run build` → exit 0
 （本阶段不改任何前端行为代码；schema 新增可选字段不得破坏现有类型。）
 
-- [ ] **Step 4: 后端全量最终回归**
+- [x] **Step 4: 后端全量最终回归**
 
 Run（backend/）: `./mvnw.cmd -Dtest=GameServiceTest,OpenApiSpecTest test` → 全绿
 Run: `./mvnw.cmd test` → 283 tests，0 失败。记录精确输出数字用于交付报告。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/api-v1.md docs/llm-bot-decision-design.md frontend/src/api/schema.d.ts
 git commit -m "docs: document async command contract and refresh schemas"
 ```
 
-- [ ] **Step 6: 停下交评审（阶段 A 验收门）**
+- [x] **Step 6: 停下交评审（阶段 A 验收门）**
 
 向用户报告：文件清单、四个提交哈希、精确测试数量（后端 283 / 前端 96）、API 示例（202 回执、GET commands 终态）、未通过项（如有）、明确声明**未接任何真实模型**、B–E 待放行。不得自行进入阶段 B。
 

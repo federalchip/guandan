@@ -22,6 +22,7 @@ import com.guandan.rules.LegalMoveGenerator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -56,7 +57,8 @@ public class GameService {
 
     @Autowired
     public GameService(InMemoryGameStore store, GameSeedSource seedSource, BotPolicy policy,
-                       ActionAdvancer advancer, Executor commandExecutor, AsyncCommandConfig commandConfig) {
+                       ActionAdvancer advancer, @Qualifier("commandExecutor") Executor commandExecutor,
+                       AsyncCommandConfig commandConfig) {
         this.store = store;
         this.seedSource = seedSource;
         this.policy = policy;
@@ -266,22 +268,31 @@ public class GameService {
         }
     }
 
-    /** 锁内调用：一次提交状态、事件、序号与幂等收据。 */
+    /**
+     * 锁内调用：先构建完整响应（映射失败时记录分毫未动，ownsJob 仍成立，failJob 可落终态 FAILED），
+     * 再一次性提交状态、事件、序号，最后写入幂等收据。
+     */
     private CommandResponse commitBatch(GameRecord rec, String requestId, List<Object> fingerprint,
                                         BotBatchRunner.BatchResult r) {
+        CommandResponse response = buildResponse(rec, requestId, r);
         rec.state = r.state();
         rec.events.addAll(r.events());
         rec.nextSeq = r.nextSeq();
+        rec.idempotency.put(requestId, new CachedCommand(fingerprint, response));
+        return response;
+    }
+
+    /** 只读记录快照与批次结果构建响应，不改任何可变字段；包私有可覆写，仅供测试注入映射故障。 */
+    CommandResponse buildResponse(GameRecord rec, String requestId, BotBatchRunner.BatchResult r) {
+        List<SequencedEvent> combined = new ArrayList<>(rec.events);
+        combined.addAll(r.events());
         GameView finalView = DtoMapper.toGameView(rec.gameId,
-                PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(rec.events));
+                PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(combined));
         List<EventView> eventViews = new ArrayList<>(r.events().size());
         for (SequencedEvent se : r.events()) {
             eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
         }
-        CommandResponse response = new CommandResponse(requestId, r.acceptedVersion(),
-                finalView, List.copyOf(eventViews));
-        rec.idempotency.put(requestId, new CachedCommand(fingerprint, response));
-        return response;
+        return new CommandResponse(requestId, r.acceptedVersion(), finalView, List.copyOf(eventViews));
     }
 
     private void requireIdle(GameRecord rec) {

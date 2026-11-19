@@ -69,6 +69,9 @@ class OpenApiSpecTest {
 
     @Test
     void committed_spec_matches_live_when_present() throws Exception {
+        if ("true".equals(System.getProperty("openapi.export"))) {
+            return;   // 导出运行会重写规范文件，drift 检查不得与其同 JVM 竞争
+        }
         if (!Files.exists(SPEC)) {
             return;   // 首次生成前跳过
         }

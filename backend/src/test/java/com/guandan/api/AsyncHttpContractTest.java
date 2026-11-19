@@ -10,6 +10,7 @@ import com.guandan.service.BotPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -43,7 +44,8 @@ class AsyncHttpContractTest {
 
     @TestConfiguration
     static class ManualConfig {
-        @Bean @Primary
+        // 与生产注入点 @Qualifier("commandExecutor") 同名匹配，@Primary 确保手动执行器胜出
+        @Bean @Primary @Qualifier("commandExecutor")
         Executor manualExecutor() { return new ManualExecutor(); }
 
         @Bean @Primary
