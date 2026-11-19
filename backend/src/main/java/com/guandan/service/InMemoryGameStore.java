@@ -17,7 +17,11 @@ public class InMemoryGameStore {
     private final ConcurrentHashMap<String, String> tokenToGameId = new ConcurrentHashMap<>();
 
     GameRecord create(String gameId, String sessionToken, long gameSeed, GameState initialState) {
-        GameRecord record = new GameRecord(gameId, sessionToken, gameSeed, initialState);
+        return create(gameId, sessionToken, gameSeed, initialState, false);
+    }
+
+    GameRecord create(String gameId, String sessionToken, long gameSeed, GameState initialState, boolean asyncMode) {
+        GameRecord record = new GameRecord(gameId, sessionToken, gameSeed, initialState, asyncMode);
         games.put(gameId, record);
         tokenToGameId.put(sessionToken, gameId);
         return record;

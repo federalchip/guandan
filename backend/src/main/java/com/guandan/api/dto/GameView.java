@@ -1,5 +1,6 @@
 package com.guandan.api.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -21,7 +22,8 @@ public record GameView(String gameId,
                        String phase,
                        ResultView result,
                        long version,
-                       List<EventView> roundEvents) {
+                       List<EventView> roundEvents,
+                       @JsonInclude(JsonInclude.Include.NON_NULL) String processingRequestId) {
     public GameView {
         roundEvents = List.copyOf(roundEvents);
     }

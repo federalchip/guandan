@@ -19,6 +19,9 @@ import com.guandan.domain.model.Phase;
 import com.guandan.engine.GameEngine;
 import com.guandan.engine.PlayerViewFactory;
 import com.guandan.rules.LegalMoveGenerator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -27,6 +30,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 权威游戏服务：会话、幂等、每局锁与命令批次。所有传输 DTO 在 api/dto 定义；领域引擎只返回
@@ -39,20 +44,32 @@ public class GameService {
 
     private static final RuleProfile PROFILE = RuleProfile.v1();
     private static final int HUMAN_SEAT = 0;
+    private static final Logger log = LoggerFactory.getLogger(GameService.class);
 
     private final InMemoryGameStore store;
     private final GameSeedSource seedSource;
     private final BotPolicy policy;
     private final ActionAdvancer advancer;
+    private final Executor executor;
+    private final AsyncCommandConfig commandConfig;
     private final BotBatchRunner runner;
 
+    @Autowired
     public GameService(InMemoryGameStore store, GameSeedSource seedSource, BotPolicy policy,
-                       ActionAdvancer advancer) {
+                       ActionAdvancer advancer, Executor commandExecutor, AsyncCommandConfig commandConfig) {
         this.store = store;
         this.seedSource = seedSource;
         this.policy = policy;
         this.advancer = advancer;
+        this.executor = commandExecutor;
+        this.commandConfig = commandConfig;
         this.runner = new BotBatchRunner(policy, advancer);
+    }
+
+    /** 同步便捷构造器：现有单元测试沿用，异步关闭、执行器为直接执行。 */
+    public GameService(InMemoryGameStore store, GameSeedSource seedSource, BotPolicy policy,
+                       ActionAdvancer advancer) {
+        this(store, seedSource, policy, advancer, Runnable::run, AsyncCommandConfig.syncDefaults());
     }
 
     public CreatedGame createGame() {
@@ -60,7 +77,7 @@ public class GameService {
         GameState state = GameEngine.newGame(seed, PROFILE);
         String gameId = UUID.randomUUID().toString();
         String sessionToken = UUID.randomUUID().toString();
-        store.create(gameId, sessionToken, seed, state);
+        store.create(gameId, sessionToken, seed, state, commandConfig.asyncEnabled());
         GameView view = DtoMapper.toGameView(gameId, PlayerViewFactory.getPlayerView(state, HUMAN_SEAT));
         return new CreatedGame(gameId, sessionToken, view);
     }
@@ -70,7 +87,7 @@ public class GameService {
         rec.lock.lock();
         try {
             return DtoMapper.toGameView(rec.gameId, PlayerViewFactory.getPlayerView(rec.state, HUMAN_SEAT),
-                    currentRoundEvents(rec.events));
+                    currentRoundEvents(rec.events), rec.currentJob == null ? null : rec.currentJob.requestId());
         } finally {
             rec.lock.unlock();
         }
@@ -80,6 +97,7 @@ public class GameService {
         GameRecord rec = authorize(gameId, sessionToken);
         rec.lock.lock();
         try {
+            requireIdle(rec);
             request.validate();
             GameState state = rec.state;
             requireVersion(state, request.expectedVersion());
@@ -94,6 +112,7 @@ public class GameService {
         GameRecord rec = authorize(gameId, sessionToken);
         rec.lock.lock();
         try {
+            requireIdle(rec);
             GameState state = rec.state;
             boolean humanTurn = state.phase() == Phase.PLAYING
                     && state.currentPlayer() != null && state.currentPlayer() == HUMAN_SEAT;
@@ -110,7 +129,19 @@ public class GameService {
     }
 
     public CommandResponse submit(String gameId, String sessionToken, CommandRequest command) {
+        CommandOutcome outcome = submitCommand(gameId, sessionToken, command);
+        if (outcome instanceof CommandOutcome.Completed c) {
+            return c.response();
+        }
+        throw new IllegalStateException("命令进入异步处理，请使用 submitCommand/commandStatus");
+    }
+
+    public CommandOutcome submitCommand(String gameId, String sessionToken, CommandRequest command) {
         GameRecord rec = authorize(gameId, sessionToken);
+        CommandJob job;
+        GameState origin;
+        Action humanAction;
+        long startSeq;
         rec.lock.lock();
         try {
             command.validate();
@@ -118,32 +149,155 @@ public class GameService {
             CachedCommand cached = rec.idempotency.get(command.requestId());
             if (cached != null) {
                 if (cached.fingerprint().equals(fingerprint)) {
-                    return cached.response();
+                    return new CommandOutcome.Completed(cached.response());
                 }
-                throw new GameRuleException("REQUEST_ID_REUSED", "request_id 已用于不同请求体",
-                        Map.of("request_id", command.requestId()));
+                throw reused(command.requestId());
             }
-
-            GameState work = rec.state;
-            requireVersion(work, command.expectedVersion());
-
-            BotBatchRunner.BatchResult r = runner.run(work, toAction(command.action()), rec.gameSeed, rec.nextSeq);
-            rec.state = r.state();
-            rec.events.addAll(r.events());
-            rec.nextSeq = r.nextSeq();
-            GameView finalView = DtoMapper.toGameView(rec.gameId,
-                    PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(rec.events));
-            List<EventView> eventViews = new ArrayList<>(r.events().size());
-            for (SequencedEvent se : r.events()) {
-                eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
+            CachedFailure failed = rec.failures.get(command.requestId());
+            if (failed != null) {
+                if (failed.fingerprint().equals(fingerprint)) {
+                    return new CommandOutcome.Failed(failed.code(), failed.message());
+                }
+                throw reused(command.requestId());
             }
-            CommandResponse response = new CommandResponse(command.requestId(), r.acceptedVersion(),
-                    finalView, List.copyOf(eventViews));
-            rec.idempotency.put(command.requestId(), new CachedCommand(fingerprint, response));
-            return response;
+            CommandJob pending = rec.currentJob;
+            if (pending != null) {
+                if (pending.requestId().equals(command.requestId())) {
+                    if (pending.fingerprint().equals(fingerprint)) {
+                        return new CommandOutcome.Pending(pending.requestId(), commandConfig.pollAfterMillis());
+                    }
+                    throw reused(command.requestId());
+                }
+                throw busy(pending);
+            }
+            requireVersion(rec.state, command.expectedVersion());
+            if (!rec.asyncMode) {
+                BotBatchRunner.BatchResult r = runner.run(rec.state, toAction(command.action()),
+                        rec.gameSeed, rec.nextSeq);
+                return new CommandOutcome.Completed(commitBatch(rec, command.requestId(), fingerprint, r));
+            }
+            humanAction = toAction(command.action());
+            // 锁内预校验真人动作：非法同步拒绝，不登记任务；工作任务将从原始快照确定性重放
+            advancer.applyAction(rec.state, HUMAN_SEAT, humanAction);
+            origin = rec.state;
+            startSeq = rec.nextSeq;
+            job = new CommandJob(command.requestId(), fingerprint, origin.version(),
+                    ++rec.jobGeneration, System.currentTimeMillis() + commandConfig.batchTimeoutMillis());
+            rec.currentJob = job;
         } finally {
             rec.lock.unlock();
         }
+        try {
+            executor.execute(() -> runAsyncBatch(rec, job, origin, humanAction, startSeq));
+        } catch (RejectedExecutionException e) {
+            rec.lock.lock();
+            try {
+                if (rec.currentJob == job) {
+                    rec.currentJob = null;
+                }
+            } finally {
+                rec.lock.unlock();
+            }
+            throw new GameRuleException("COMMAND_QUEUE_FULL", "命令队列已满，请稍后重试", Map.of());
+        }
+        return new CommandOutcome.Pending(job.requestId(), commandConfig.pollAfterMillis());
+    }
+
+    public CommandOutcome commandStatus(String gameId, String sessionToken, String requestId) {
+        GameRecord rec = authorize(gameId, sessionToken);
+        rec.lock.lock();
+        try {
+            CommandJob pending = rec.currentJob;
+            if (pending != null && pending.requestId().equals(requestId)) {
+                return new CommandOutcome.Pending(requestId, commandConfig.pollAfterMillis());
+            }
+            CachedCommand cached = rec.idempotency.get(requestId);
+            if (cached != null) {
+                return new CommandOutcome.Completed(cached.response());
+            }
+            CachedFailure failed = rec.failures.get(requestId);
+            if (failed != null) {
+                return new CommandOutcome.Failed(failed.code(), failed.message());
+            }
+            throw new GameRuleException("COMMAND_NOT_FOUND", "命令不存在",
+                    Map.of("request_id", String.valueOf(requestId)));
+        } finally {
+            rec.lock.unlock();
+        }
+    }
+
+    private void runAsyncBatch(GameRecord rec, CommandJob job, GameState origin, Action humanAction, long startSeq) {
+        try {
+            BotBatchRunner.BatchResult r = runner.run(origin, humanAction, rec.gameSeed, startSeq);
+            rec.lock.lock();
+            try {
+                if (!ownsJob(rec, job)) {
+                    log.warn("丢弃迟到批次: game={} request={}", rec.gameId, job.requestId());
+                    return;
+                }
+                commitBatch(rec, job.requestId(), job.fingerprint(), r);
+                rec.currentJob = null;
+            } finally {
+                rec.lock.unlock();
+            }
+        } catch (GameRuleException e) {
+            failJob(rec, job, e.code(), e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("异步批次内部故障: game={} request={}", rec.gameId, job.requestId(), e);
+            failJob(rec, job, "INTERNAL_ERROR", "内部错误");
+        }
+    }
+
+    /** 任务实例同一即涵盖 request_id 与 generation 核对；另核对起始版本，拒绝迟到写入。 */
+    private static boolean ownsJob(GameRecord rec, CommandJob job) {
+        return rec.currentJob == job && rec.state.version() == job.startVersion();
+    }
+
+    private void failJob(GameRecord rec, CommandJob job, String code, String message) {
+        rec.lock.lock();
+        try {
+            if (!ownsJob(rec, job)) {
+                return;
+            }
+            rec.failures.put(job.requestId(), new CachedFailure(job.fingerprint(), code, message));
+            rec.currentJob = null;
+        } finally {
+            rec.lock.unlock();
+        }
+    }
+
+    /** 锁内调用：一次提交状态、事件、序号与幂等收据。 */
+    private CommandResponse commitBatch(GameRecord rec, String requestId, List<Object> fingerprint,
+                                        BotBatchRunner.BatchResult r) {
+        rec.state = r.state();
+        rec.events.addAll(r.events());
+        rec.nextSeq = r.nextSeq();
+        GameView finalView = DtoMapper.toGameView(rec.gameId,
+                PlayerViewFactory.getPlayerView(r.state(), HUMAN_SEAT), currentRoundEvents(rec.events));
+        List<EventView> eventViews = new ArrayList<>(r.events().size());
+        for (SequencedEvent se : r.events()) {
+            eventViews.add(DtoMapper.toEventView(se.seq(), se.stateVersion(), se.event()));
+        }
+        CommandResponse response = new CommandResponse(requestId, r.acceptedVersion(),
+                finalView, List.copyOf(eventViews));
+        rec.idempotency.put(requestId, new CachedCommand(fingerprint, response));
+        return response;
+    }
+
+    private void requireIdle(GameRecord rec) {
+        if (rec.currentJob != null) {
+            throw busy(rec.currentJob);
+        }
+    }
+
+    private GameRuleException busy(CommandJob pending) {
+        return new GameRuleException("GAME_BUSY", "本局有命令正在处理",
+                Map.of("request_id", pending.requestId(), "poll_after_ms", commandConfig.pollAfterMillis()));
+    }
+
+    private static GameRuleException reused(String requestId) {
+        return new GameRuleException("REQUEST_ID_REUSED", "request_id 已用于不同请求体",
+                Map.of("request_id", requestId));
     }
 
     // ---- 辅助 ----
