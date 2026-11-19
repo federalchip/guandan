@@ -2,7 +2,7 @@
 
 日期：2026-11-17
 
-状态：设计草案，尚未实施
+状态：阶段 A 已实施（异步本地策略）；B–E 待实施
 
 ## 目标与边界
 
@@ -78,10 +78,12 @@
 
 | 请求 | 建议响应 | 关键语义 |
 | --- | --- | --- |
-| `POST /api/v1/games/{id}/actions` | 同步路径仍为 `200 CommandResponse`；异步登记或同 ID 处理中为 `202 {request_id, status:"PENDING", poll_after_ms:500}`；同 ID 失败重试为 `200 {status:"FAILED", error:{code,message}}` | 沿用现有 Bearer 认证、请求体指纹和先查幂等再查版本的顺序。 |
+| `POST /api/v1/games/{id}/actions` | 同步路径仍为 `200 CommandResponse`；异步登记或同 ID 处理中为 `202 {request_id, status:"PENDING", poll_after_ms:500}`；同 ID 失败重试为 `200 {status:"FAILED", error:{code,message}}`；执行器队列满返回 `503 COMMAND_QUEUE_FULL`（任务已清除，可原 ID 重试） | 沿用现有 Bearer 认证、请求体指纹和先查幂等再查版本的顺序。 |
 | `GET /api/v1/games/{id}/commands/{request_id}` | `202` 处理中；`200 {status:"COMPLETED", result:CommandResponse}` 或 `200 {status:"FAILED", error:{code,message}}`；未知 ID 为 `404 COMMAND_NOT_FOUND` | 仅本局令牌可查。查询不触发第二次执行。`FAILED` 表示已回滚，用户可刷新后发起新命令。 |
 | `GET /api/v1/games/{id}` | 现有 `GameView` 增加可选 `processing_request_id` | 处理中返回旧快照，但前端必须保持操作锁并继续查询该命令。无处理中命令时字段缺省。 |
 | `POST /resolve`、`GET /legal-actions` | 本局处理中时 `409 GAME_BUSY` | 避免对即将改变的旧快照继续解析或给出提示。 |
+
+注：`503 COMMAND_QUEUE_FULL` 为实现期（阶段 A）新增的错误码，已同步至 `docs/api-v1.md` 的错误码表与异步命令模式章节。
 
 同 ID 不同请求体继续返回 `409 REQUEST_ID_REUSED`；不同 ID 在本局处理中返回 `409 GAME_BUSY`，错误详情仅包含正在处理的 `request_id` 与建议等待时间，不包含手牌或令牌。`GET /commands/{id}` 的 `COMMAND_NOT_FOUND` 可能表示原 `POST` 根本没有登记，前端应以**原请求体和原 ID**重发 `POST`，不能生成新 ID；`GAME_NOT_FOUND` 则表示整局失效，应走已有的重新开局提示。终态 `FAILED` 也按同 ID 幂等缓存，不再执行旧命令；用户确认旧状态后用新 ID 发起新命令。所有新增路由仍由 `SessionAuthInterceptor` 在请求体解析前鉴权。更新 `docs/openapi.json`、生成的前端 schema 和 `docs/api-v1.md` 时，把异步响应标为新增合同，不能把旧同步响应悄悄删掉。
 

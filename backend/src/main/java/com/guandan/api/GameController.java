@@ -30,7 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 同步 HTTP 路由，统一 /api/v1 前缀；除创建外使用 {@code Authorization: Bearer <session_token>}。
+ * 同步/异步 HTTP 路由，统一 /api/v1 前缀；除创建外使用 {@code Authorization: Bearer <session_token>}。
  * 路由不接收客户端 player_id（真人固定座位 0）。控制器只做请求/响应，业务在 {@link GameService}。
  * 会话鉴权由 {@link SessionAuthInterceptor} 在请求体解析前前置完成，服务层再次校验（防御性、且供单元测试）。
  */
