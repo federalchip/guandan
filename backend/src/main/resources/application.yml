@@ -11,3 +11,9 @@ spring:
       accept-float-as-int: false
     mapper:
       allow-coercion-of-scalars: false
+
+guandan:
+  commands:
+    async-enabled: false
+    batch-timeout-ms: 12000
+    poll-after-ms: 500

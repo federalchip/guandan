@@ -45,6 +45,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** 提交真人命令：同步完成 200 CommandResponse；异步登记 202；同 ID 终态失败 200 CommandFailed */
         post: operations["submit"];
         delete?: never;
         options?: never;
@@ -92,6 +93,23 @@ export interface paths {
             cookie?: never;
         };
         get: operations["legalActions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/games/{id}/commands/{requestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询命令状态：202 处理中；200 终态（COMPLETED/FAILED）；404 未知命令或旧局 */
+        get: operations["commandStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -149,6 +167,7 @@ export interface components {
             /** Format: int64 */
             version?: number;
             round_events?: components["schemas"]["EventView"][];
+            processing_request_id?: string;
         };
         MoveView: {
             card_ids?: number[];
@@ -207,6 +226,23 @@ export interface components {
             state?: components["schemas"]["GameView"];
             events?: components["schemas"]["EventView"][];
         };
+        CommandFailed: {
+            status?: string;
+            error?: components["schemas"]["ErrorBody"];
+        };
+        ErrorBody: {
+            code?: string;
+            message?: string;
+            details?: {
+                [key: string]: Record<string, never>;
+            };
+        };
+        PendingResponse: {
+            request_id?: string;
+            status?: string;
+            /** Format: int64 */
+            poll_after_ms?: number;
+        };
         HealthResponse: {
             status?: string;
         };
@@ -215,6 +251,10 @@ export interface components {
             version?: number;
             moves?: components["schemas"]["MoveView"][];
             can_pass?: boolean;
+        };
+        CommandCompleted: {
+            status?: string;
+            result?: components["schemas"]["CommandResponse"];
         };
     };
     responses: never;
@@ -294,13 +334,22 @@ export interface operations {
             };
         };
         responses: {
-            /** @description OK */
+            /** @description 同步完成或同 ID 终态失败 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["CommandResponse"];
+                    "*/*": components["schemas"]["CommandResponse"] | components["schemas"]["CommandFailed"];
+                };
+            };
+            /** @description 已登记，机器人批次处理中 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PendingResponse"];
                 };
             };
         };
@@ -369,6 +418,49 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["LegalActionsResponse"];
+                };
+            };
+        };
+    };
+    commandStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                id: string;
+                requestId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 终态 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["CommandCompleted"] | components["schemas"]["CommandFailed"];
+                };
+            };
+            /** @description 处理中 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["PendingResponse"];
+                };
+            };
+            /** @description COMMAND_NOT_FOUND / GAME_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ErrorBody"];
                 };
             };
         };

@@ -72,6 +72,11 @@ public final class DtoMapper {
     }
 
     public static GameView toGameView(String gameId, PlayerView v, List<EventView> roundEvents) {
+        return toGameView(gameId, v, roundEvents, null);
+    }
+
+    public static GameView toGameView(String gameId, PlayerView v, List<EventView> roundEvents,
+                                      String processingRequestId) {
         List<CardView> ownHand = new ArrayList<>(v.ownHand().size());
         for (Card c : v.ownHand()) {
             ownHand.add(toCardView(c));
@@ -88,7 +93,7 @@ public final class DtoMapper {
                 v.levelRank(),
                 v.phase().name(),
                 v.result() == null ? null : toResultView(v.result()),
-                v.version(), List.copyOf(roundEvents));
+                v.version(), List.copyOf(roundEvents), processingRequestId);
     }
 
     public static EventView toEventView(long seq, long stateVersion, DomainEvent e) {

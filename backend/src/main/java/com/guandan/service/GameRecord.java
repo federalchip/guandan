@@ -20,13 +20,22 @@ final class GameRecord {
     final ReentrantLock lock = new ReentrantLock();
     final List<SequencedEvent> events = new ArrayList<>();
     final Map<String, CachedCommand> idempotency = new HashMap<>();
+    final boolean asyncMode;
+    final Map<String, CachedFailure> failures = new HashMap<>();
+    CommandJob currentJob;
+    long jobGeneration;
     long nextSeq = 1;
     volatile GameState state;
 
     GameRecord(String gameId, String sessionToken, long gameSeed, GameState state) {
+        this(gameId, sessionToken, gameSeed, state, false);
+    }
+
+    GameRecord(String gameId, String sessionToken, long gameSeed, GameState state, boolean asyncMode) {
         this.gameId = gameId;
         this.sessionToken = sessionToken;
         this.gameSeed = gameSeed;
         this.state = state;
+        this.asyncMode = asyncMode;
     }
 }

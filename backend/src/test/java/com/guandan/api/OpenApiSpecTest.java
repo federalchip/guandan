@@ -47,9 +47,17 @@ class OpenApiSpecTest {
         JsonNode paths = spec.get("paths");
         for (String p : new String[]{"/api/v1/games", "/api/v1/games/{id}",
                 "/api/v1/games/{id}/legal-actions", "/api/v1/games/{id}/resolve",
-                "/api/v1/games/{id}/actions"}) {
+                "/api/v1/games/{id}/actions", "/api/v1/games/{id}/commands/{requestId}"}) {
             assertTrue(paths.has(p), "缺少路径 " + p);
         }
+        assertTrue(spec.at("/components/schemas/GameView/properties").has("processing_request_id"),
+                "GameView 应含可选 processing_request_id");
+        assertTrue(spec.at("/paths/~1api~1v1~1games~1{id}~1actions/post/responses").has("202"),
+                "POST /actions 应声明 202 异步登记");
+        assertTrue(spec.at("/paths/~1api~1v1~1games~1{id}~1commands~1{requestId}/get/responses").has("202"),
+                "GET /commands 应声明 202 处理中");
+        assertTrue(spec.at("/paths/~1api~1v1~1games~1{id}~1commands~1{requestId}/get/responses").has("404"),
+                "GET /commands 应声明 404");
         JsonNode action = spec.at("/components/schemas/ActionRequest/properties");
         assertTrue(action.has("kind"), "ActionRequest.kind 缺失");
         assertTrue(action.has("card_ids"), "应为 snake_case card_ids");
@@ -61,6 +69,9 @@ class OpenApiSpecTest {
 
     @Test
     void committed_spec_matches_live_when_present() throws Exception {
+        if ("true".equals(System.getProperty("openapi.export"))) {
+            return;   // 导出运行会重写规范文件，drift 检查不得与其同 JVM 竞争
+        }
         if (!Files.exists(SPEC)) {
             return;   // 首次生成前跳过
         }

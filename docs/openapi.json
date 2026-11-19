@@ -83,6 +83,7 @@
     "/api/v1/games/{id}/actions" : {
       "post" : {
         "tags" : [ "game-controller" ],
+        "summary" : "提交真人命令：同步完成 200 CommandResponse；异步登记 202；同 ID 终态失败 200 CommandFailed",
         "operationId" : "submit",
         "parameters" : [ {
           "name" : "id",
@@ -111,11 +112,25 @@
         },
         "responses" : {
           "200" : {
-            "description" : "OK",
+            "description" : "同步完成或同 ID 终态失败",
             "content" : {
               "*/*" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/CommandResponse"
+                  "oneOf" : [ {
+                    "$ref" : "#/components/schemas/CommandResponse"
+                  }, {
+                    "$ref" : "#/components/schemas/CommandFailed"
+                  } ]
+                }
+              }
+            }
+          },
+          "202" : {
+            "description" : "已登记，机器人批次处理中",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingResponse"
                 }
               }
             }
@@ -200,6 +215,71 @@
               "*/*" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/LegalActionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/games/{id}/commands/{requestId}" : {
+      "get" : {
+        "tags" : [ "game-controller" ],
+        "summary" : "查询命令状态：202 处理中；200 终态（COMPLETED/FAILED）；404 未知命令或旧局",
+        "operationId" : "commandStatus",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "requestId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "Authorization",
+          "in" : "header",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "终态",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "oneOf" : [ {
+                    "$ref" : "#/components/schemas/CommandCompleted"
+                  }, {
+                    "$ref" : "#/components/schemas/CommandFailed"
+                  } ]
+                }
+              }
+            }
+          },
+          "202" : {
+            "description" : "处理中",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PendingResponse"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "COMMAND_NOT_FOUND / GAME_NOT_FOUND",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -328,6 +408,9 @@
             "items" : {
               "$ref" : "#/components/schemas/EventView"
             }
+          },
+          "processing_request_id" : {
+            "type" : "string"
           }
         }
       },
@@ -495,6 +578,46 @@
           }
         }
       },
+      "CommandFailed" : {
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "error" : {
+            "$ref" : "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "ErrorBody" : {
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "details" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "object"
+            }
+          }
+        }
+      },
+      "PendingResponse" : {
+        "properties" : {
+          "request_id" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "poll_after_ms" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
       "HealthResponse" : {
         "properties" : {
           "status" : {
@@ -516,6 +639,16 @@
           },
           "can_pass" : {
             "type" : "boolean"
+          }
+        }
+      },
+      "CommandCompleted" : {
+        "properties" : {
+          "status" : {
+            "type" : "string"
+          },
+          "result" : {
+            "$ref" : "#/components/schemas/CommandResponse"
           }
         }
       }

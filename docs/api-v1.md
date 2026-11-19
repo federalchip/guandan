@@ -26,6 +26,8 @@
 | `POST /api/v1/games/{id}/actions` | Bearer | CommandRequest | `200` CommandResponse（真人 + 机器人批次） |
 | `GET /api/v1/health` | 无 | 无 | `200 {"status":"UP"}` |
 
+异步模式（202/命令查询/GAME_BUSY 等）见下文『异步命令模式』章节。
+
 ## 数据结构
 
 ### GameView
@@ -140,14 +142,17 @@
 | 401 | `SESSION_INVALID` | 缺少令牌或令牌无效 |
 | 403 | `SESSION_FORBIDDEN` | 令牌属于另一局 |
 | 404 | `GAME_NOT_FOUND` | 游戏不存在或服务重启丢失 |
+| 404 | `COMMAND_NOT_FOUND` | 异步模式：查询未知命令 ID（可能原 POST 未登记） |
 | 409 | `VERSION_CONFLICT` | `expected_version` 不符 |
 | 409 | `NOT_YOUR_TURN` | 非当前玩家 |
 | 409 | `GAME_FINISHED` | 结束后提交动作 |
 | 409 | `REQUEST_ID_REUSED` | 同 id 不同请求体 |
+| 409 | `GAME_BUSY` | 异步模式：本局有命令处理中（`details` 仅含 `request_id` 与 `poll_after_ms`） |
 | 409 | `AMBIGUOUS_DECLARATION` | 多声明未带键（`details.choices` 给出有效声明） |
 | 422 | `SCHEMA_INVALID` | 字段类型/ID 范围/请求结构不合法（含判别联合违规、未知字段、标量强制、域级 `CARD_ID_OUT_OF_RANGE` 规范化） |
 | 500 | `BOT_STEP_LIMIT` | 机器人步数超上限，批次回滚 |
 | 500 | `INTERNAL_ERROR` | 未预期异常，批次回滚 |
+| 503 | `COMMAND_QUEUE_FULL` | 异步模式：执行器队列满，任务已清除，可用原 ID 重试 |
 
 错误优先级：缺少令牌先 `401`；携带令牌但游戏不存在先 `404`；游戏存在时再区分无效令牌 `401` 与其他局的有效令牌 `403`。会话鉴权由前置拦截器在**请求体解析之前**完成，故不仅语义校验、连 JSON 语法/类型/未知字段等**解析期结构错误**在无令牌时也一律先 `401`（而非 `422`）；令牌有效时结构错误仍为 `422`。`POST /api/v1/games`（创建）与 `/api/v1/health` 不鉴权。
 
@@ -157,3 +162,37 @@
  "details": {"choices": [ {"card_ids":[1,4,8,12,16],"kind":"STRAIGHT","...":"..."},
                           {"card_ids":[1,4,8,12,16],"kind":"STRAIGHT_FLUSH","...":"..."} ]}}
 ```
+
+## 异步命令模式（新增合同，默认关闭）
+
+开关 `guandan.commands.async-enabled=true` 时，新建牌局固定为异步模式；已有同步局不受影响。
+同步模式的全部原合同（200 CommandResponse、错误码、幂等顺序）保持不变。
+
+相关配置（`application.yml`）：`guandan.commands.async-enabled`（默认 `false`）、
+`guandan.commands.batch-timeout-ms`（默认 `12000`）、`guandan.commands.poll-after-ms`（默认 `500`）。
+模式在牌局创建时固定，运行中修改配置不影响已有牌局。
+
+- `POST /api/v1/games/{id}/actions`
+  - 异步登记成功：`202 {"request_id":"…","status":"PENDING","poll_after_ms":500}`。202 仅表示已登记，不表示真人动作已提交；牌局对外保持上一个已提交快照。
+  - 同 ID 同体处理中：同一 `202` 回执，不重复登记。
+  - 同 ID 完成后的重试：原 `200 CommandResponse`（幂等收据）。
+  - 同 ID 终态失败的重试：`200 {"status":"FAILED","error":{"code","message","details"}}`，不再执行。
+  - 同 ID 异体：`409 REQUEST_ID_REUSED`（先于版本检查）。
+  - 不同 ID 且本局处理中：`409 GAME_BUSY`，details 仅含 `request_id` 与 `poll_after_ms`。
+  - 版本不符（无处理中任务）：`409 VERSION_CONFLICT`，不登记任务。
+  - 非法真人动作：同步 4xx 拒绝，不登记任务。
+  - 执行器队列满：`503 COMMAND_QUEUE_FULL`，任务已清除，可用原 ID 重试。
+- `GET /api/v1/games/{id}/commands/{requestId}`（仅本局令牌）
+  - 处理中：`202`（同登记回执形态）。
+  - 完成：`200 {"status":"COMPLETED","result":CommandResponse}`。
+  - 失败：`200 {"status":"FAILED","error":ErrorBody}`；FAILED 表示整批已回滚，可刷新后以新 ID 发起新命令。
+  - 未知命令：`404 COMMAND_NOT_FOUND`（可能原 POST 未登记，前端应以原 ID 原体重发 POST）。
+  - 旧局失效：`404 GAME_NOT_FOUND`。
+  - 查询不触发第二次执行。
+- `GET /api/v1/games/{id}`：GameView 新增可选 `processing_request_id`；处理中返回旧快照并携带该字段，无处理中命令时字段缺省。
+- 本局处理中时 `POST /resolve` 与 `GET /legal-actions` 返回 `409 GAME_BUSY`。
+- 命令状态机：PENDING → COMPLETED | FAILED，终态不可变；每局同时最多一个未完成命令。
+- 进程重启仍使整局与命令一并失效（内存模式边界不变）。
+
+阶段 A 范围说明：异步批次仍由本地随机策略（`RandomLegalPolicy`）执行，**未接任何真实模型**；
+整批截止时间已随任务登记，但看门狗回收与超时重算属阶段 B，尚未实现。
